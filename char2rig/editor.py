@@ -62,7 +62,8 @@ PAGE = """<!doctype html>
   <button id="tab-contour" class="ghost">1 · Контур</button>
   <button id="tab-silhouette" class="ghost">1б · Кисть</button>
   <button id="tab-skeleton">2 · Скелет</button>
-  <button id="rebuild">Пересчитать</button>
+  <button id="save">Сохранить</button>
+  <button id="rebuild">Сохранить и пересчитать</button>
   <button id="reset" class="ghost">Сбросить этап</button>
   <button id="fit" class="ghost">Вписать</button>
   <span id="note">этапы правятся сверху вниз: сначала силуэт, потом скелет</span>
@@ -79,6 +80,9 @@ let baseScale = 1, zoom = 1, panX = 0, panY = 0, panning = null;
 let mode = 'skeleton', brush = 22, painting = 0;
 let strokes = null, strokeCtx = null, silhouette = new Image();
 let contour = [], contourNode = null, contourHover = -1;
+// что человек трогал: правки копятся между вкладками и уходят вместе,
+// иначе уйдёшь с вкладки не сохранившись — и работа пропала
+let contourEdited = false, painted = false;
 
 const ZOOM = ' · колесо — зум, средняя кнопка — тащить, 0 — вписать';
 const NOTES = {{
@@ -136,6 +140,9 @@ async function boot() {{
 
   const fetched = await (await fetch('contour.json?' + Date.now())).json();
   contour = fetched.points || [];
+  // то, что пришло с сервера, уже сохранено — считать это правкой не надо
+  contourEdited = false;
+  painted = false;
   draw();
 }}
 
@@ -270,6 +277,7 @@ function paintAt(p) {{
   strokeCtx.beginPath();
   strokeCtx.arc(p.x, p.y, brush / 2, 0, 7);
   strokeCtx.fill();
+  painted = true;
 }}
 
 function nearestNode(p) {{
@@ -304,6 +312,7 @@ canvas.ondblclick = e => {{
   if (edge >= 0) {{
     contour.splice(edge + 1, 0, [p.x, p.y]);
     contourHover = edge + 1;
+    contourEdited = true;
     draw();
   }}
 }};
@@ -318,7 +327,11 @@ canvas.onmousedown = e => {{
   if (mode === 'contour') {{
     const node = nearestNode(p);
     if (e.button === 2) {{
-      if (node >= 0 && contour.length > 3) {{ contour.splice(node, 1); draw(); }}
+      if (node >= 0 && contour.length > 3) {{
+        contour.splice(node, 1);
+        contourEdited = true;
+        draw();
+      }}
       return;
     }}
     contourNode = node;
@@ -341,8 +354,10 @@ canvas.onmousemove = e => {{
   }}
   const p = at(e);
   if (mode === 'contour') {{
-    if (contourNode !== null && contourNode >= 0) contour[contourNode] = [p.x, p.y];
-    else contourHover = nearestNode(p);
+    if (contourNode !== null && contourNode >= 0) {{
+      contour[contourNode] = [p.x, p.y];
+      contourEdited = true;
+    }} else contourHover = nearestNode(p);
     draw();
     return;
   }}
@@ -396,8 +411,10 @@ document.getElementById('reset').onclick = async () => {{
   if (mode === 'contour') {{
     const fetched = await (await fetch('contour.json?auto=1&' + Date.now())).json();
     contour = fetched.points || [];
+    contourEdited = false;
   }} else if (mode === 'silhouette') {{
     strokeCtx.clearRect(0, 0, strokes.width, strokes.height);
+    painted = false;
   }} else {{
     joints = JSON.parse(JSON.stringify(base));
     for (const b of bones) radii[b.name] = 1;
@@ -418,10 +435,14 @@ function payload() {{
     joints: deltas,
     radius_scale: scales,
     strokes: strokes ? strokes.toDataURL('image/png') : null,
-    contour: mode === 'contour' ? contour.map(p => [
+    // контур уходит, только если его правили: иначе автоматический контур
+    // записался бы как ручной и навсегда подменил бы собой нейросеть
+    contour: contourEdited ? contour.map(p => [
       Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]) : null,
-    // правка силуэта тянет за собой весь конвейер, правка скелета — часть
-    start: mode === 'skeleton' ? 'pose' : 'background',
+    // с какого этапа пересчитывать: правка силуэта тянет весь конвейер,
+    // правка скелета — только часть. Смотрим на то, что трогали, а не на
+    // то, какая вкладка сейчас открыта
+    start: (contourEdited || painted) ? 'background' : 'pose',
   }};
 }}
 
@@ -433,6 +454,27 @@ async function post(path) {{
   }});
   return response;
 }}
+
+function summary() {{
+  const parts = [];
+  if (contourEdited) parts.push('контур (' + contour.length + ' узлов)');
+  if (painted) parts.push('мазки');
+  const movedJoints = Object.keys(joints).filter(
+    n => base[n][0] !== joints[n][0] || base[n][1] !== joints[n][1]).length;
+  if (movedJoints) parts.push('суставов ' + movedJoints);
+  const thick = Object.values(radii).filter(k => k !== 1).length;
+  if (thick) parts.push('толщин ' + thick);
+  return parts.length ? parts.join(', ') : 'ничего не менялось';
+}}
+
+document.getElementById('save').onclick = async e => {{
+  e.target.disabled = true;
+  const response = await post('save');
+  note.textContent = response.ok
+    ? 'сохранено: ' + summary()
+    : 'не сохранилось: ' + response.status;
+  e.target.disabled = false;
+}};
 
 document.getElementById('rebuild').onclick = async e => {{
   e.target.disabled = true;
