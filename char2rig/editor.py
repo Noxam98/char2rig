@@ -64,6 +64,7 @@ PAGE = """<!doctype html>
   <button id="tab-skeleton">2 · Скелет</button>
   <button id="rebuild">Пересчитать</button>
   <button id="reset" class="ghost">Сбросить этап</button>
+  <button id="fit" class="ghost">Вписать</button>
   <span id="note">этапы правятся сверху вниз: сначала силуэт, потом скелет</span>
 </header>
 <div id="stage"><canvas id="c"></canvas><img id="shot" hidden></div>
@@ -73,14 +74,19 @@ const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 const shot = document.getElementById('shot'), note = document.getElementById('note');
 let joints = {{}}, base = {{}}, bones = [], radii = {{}}, baseRadii = {{}};
 let image = new Image(), scale = 1, drag = null, hover = null;
+// вид: масштаб и сдвиг. Ctrl+колесо — зум под курсором, средняя кнопка — тащить
+let baseScale = 1, zoom = 1, panX = 0, panY = 0, panning = null;
 let mode = 'skeleton', brush = 22, painting = 0;
 let strokes = null, strokeCtx = null, silhouette = new Image();
 let contour = [], contourNode = null, contourHover = -1;
 
+const ZOOM = ' · колесо — зум, средняя кнопка — тащить, 0 — вписать';
 const NOTES = {{
-  contour: 'тяни узлы; двойной клик по линии — добавить узел; правый клик — удалить',
-  silhouette: 'левой — дорисовать тело, правой — стереть; колесо меняет кисть',
-  skeleton: 'тяни суставы; колесо над костью — толщина',
+  contour: 'узлы тянутся; двойной клик по линии — добавить, правый клик — удалить'
+           + ZOOM,
+  silhouette: 'левой — дорисовать тело, правой — стереть; колесо — кисть,'
+              + ' Ctrl+колесо — зум',
+  skeleton: 'тяни суставы; колесо над костью — толщина, Ctrl+колесо — зум',
 }};
 
 function setMode(next) {{
@@ -108,9 +114,10 @@ async function boot() {{
   }} catch (e) {{ /* правок ещё нет */ }}
 
   image.onload = () => {{
-    scale = Math.min(1, (window.innerHeight - 190) / image.height);
-    canvas.width = image.width * scale;
-    canvas.height = image.height * scale;
+    canvas.height = Math.max(320, window.innerHeight - 190);
+    canvas.width = Math.max(
+      320, Math.min(image.width * canvas.height / image.height, window.innerWidth - 380));
+    fitView();
     if (!strokes) {{
       strokes = document.createElement('canvas');
       strokes.width = image.width;
@@ -132,14 +139,27 @@ async function boot() {{
   draw();
 }}
 
+function fitView() {{
+  baseScale = Math.min(canvas.width / image.width, canvas.height / image.height);
+  zoom = 1;
+  scale = baseScale;
+  panX = (canvas.width - image.width * scale) / 2;
+  panY = (canvas.height - image.height * scale) / 2;
+  draw();
+}}
+
 function boneRadius(bone, end) {{
   const r = baseRadii[bone.name];
   return (r ? r[end] : 12) * (radii[bone.name] || 1);
 }}
 
 function draw() {{
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  // сдвиг вида делаем трансформом, а масштаб остаётся в `scale`: так все
+  // размеры узлов и линий остаются постоянными на экране при любом зуме
+  ctx.setTransform(1, 0, 0, 1, panX, panY);
+  ctx.drawImage(image, 0, 0, image.width * scale, image.height * scale);
 
   if (mode === 'contour') {{
     ctx.lineWidth = 2;
@@ -168,9 +188,10 @@ function draw() {{
     // что конвейер считает телом — поверх арта, чтобы промахи было видно
     ctx.globalAlpha = 0.45;
     if (silhouette.complete && silhouette.naturalWidth)
-      ctx.drawImage(silhouette, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(silhouette, 0, 0, image.width * scale, image.height * scale);
     ctx.globalAlpha = 0.7;
-    if (strokes) ctx.drawImage(strokes, 0, 0, canvas.width, canvas.height);
+    if (strokes)
+      ctx.drawImage(strokes, 0, 0, image.width * scale, image.height * scale);
     ctx.globalAlpha = 1;
     document.getElementById('hint').textContent =
       'полупрозрачным показан текущий силуэт; кисть ' + Math.round(brush) + ' px';
@@ -214,8 +235,8 @@ function draw() {{
 
 function at(event) {{
   const box = canvas.getBoundingClientRect();
-  return {{ x: (event.clientX - box.left) / scale,
-           y: (event.clientY - box.top) / scale }};
+  return {{ x: (event.clientX - box.left - panX) / scale,
+           y: (event.clientY - box.top - panY) / scale }};
 }}
 
 function nearestJoint(p) {{
@@ -289,6 +310,11 @@ canvas.ondblclick = e => {{
 
 canvas.onmousedown = e => {{
   const p = at(e);
+  if (e.button === 1) {{  // средняя кнопка — тащить холст
+    e.preventDefault();
+    panning = {{ x: e.clientX - panX, y: e.clientY - panY }};
+    return;
+  }}
   if (mode === 'contour') {{
     const node = nearestNode(p);
     if (e.button === 2) {{
@@ -307,6 +333,12 @@ canvas.onmousedown = e => {{
   }}
 }};
 canvas.onmousemove = e => {{
+  if (panning) {{
+    panX = e.clientX - panning.x;
+    panY = e.clientY - panning.y;
+    draw();
+    return;
+  }}
   const p = at(e);
   if (mode === 'contour') {{
     if (contourNode !== null && contourNode >= 0) contour[contourNode] = [p.x, p.y];
@@ -322,10 +354,24 @@ canvas.onmousemove = e => {{
   else {{ hover = nearestBone(p); }}
   draw();
 }};
-window.onmouseup = () => {{ drag = null; painting = 0; contourNode = null; }};
+window.onmouseup = () => {{
+  drag = null; painting = 0; contourNode = null; panning = null;
+}};
+
 canvas.onwheel = e => {{
   e.preventDefault();
-  if (mode === 'contour') return;
+  if (e.ctrlKey || e.metaKey || mode === 'contour') {{
+    // зум под курсором: точка арта под мышкой остаётся на месте
+    const box = canvas.getBoundingClientRect();
+    const mx = e.clientX - box.left, my = e.clientY - box.top;
+    const before = {{ x: (mx - panX) / scale, y: (my - panY) / scale }};
+    zoom = Math.max(0.2, Math.min(12, zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    scale = baseScale * zoom;
+    panX = mx - before.x * scale;
+    panY = my - before.y * scale;
+    draw();
+    return;
+  }}
   if (mode === 'silhouette') {{
     brush = Math.max(4, Math.min(200, brush * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
     draw();
@@ -338,6 +384,10 @@ canvas.onwheel = e => {{
   draw();
 }};
 
+document.getElementById('fit').onclick = () => fitView();
+window.addEventListener('keydown', e => {{
+  if (e.key === '0') fitView();
+}});
 document.getElementById('tab-contour').onclick = () => setMode('contour');
 document.getElementById('tab-silhouette').onclick = () => setMode('silhouette');
 document.getElementById('tab-skeleton').onclick = () => setMode('skeleton');
