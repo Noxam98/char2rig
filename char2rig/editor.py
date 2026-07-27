@@ -59,7 +59,8 @@ PAGE = """<!doctype html>
 </style>
 <header>
   <strong>{name}</strong>
-  <button id="tab-silhouette" class="ghost">1 · Силуэт</button>
+  <button id="tab-contour" class="ghost">1 · Контур</button>
+  <button id="tab-silhouette" class="ghost">1б · Кисть</button>
   <button id="tab-skeleton">2 · Скелет</button>
   <button id="rebuild">Пересчитать</button>
   <button id="reset" class="ghost">Сбросить этап</button>
@@ -74,16 +75,19 @@ let joints = {{}}, base = {{}}, bones = [], radii = {{}}, baseRadii = {{}};
 let image = new Image(), scale = 1, drag = null, hover = null;
 let mode = 'skeleton', brush = 22, painting = 0;
 let strokes = null, strokeCtx = null, silhouette = new Image();
+let contour = [], contourNode = null, contourHover = -1;
+
+const NOTES = {{
+  contour: 'тяни узлы; двойной клик по линии — добавить узел; правый клик — удалить',
+  silhouette: 'левой — дорисовать тело, правой — стереть; колесо меняет кисть',
+  skeleton: 'тяни суставы; колесо над костью — толщина',
+}};
 
 function setMode(next) {{
   mode = next;
-  document.getElementById('tab-silhouette').className =
-    next === 'silhouette' ? '' : 'ghost';
-  document.getElementById('tab-skeleton').className =
-    next === 'skeleton' ? '' : 'ghost';
-  note.textContent = next === 'silhouette'
-    ? 'левой — дорисовать тело, правой — стереть; колесо меняет кисть'
-    : 'тяни суставы; колесо над костью — толщина';
+  for (const tab of ['contour', 'silhouette', 'skeleton'])
+    document.getElementById('tab-' + tab).className = tab === next ? '' : 'ghost';
+  note.textContent = NOTES[next];
   draw();
 }}
 
@@ -122,6 +126,10 @@ async function boot() {{
   image.src = 'source.png?' + Date.now();
   silhouette.onload = draw;
   silhouette.src = 'silhouette.png?' + Date.now();
+
+  const fetched = await (await fetch('contour.json?' + Date.now())).json();
+  contour = fetched.points || [];
+  draw();
 }}
 
 function boneRadius(bone, end) {{
@@ -132,6 +140,29 @@ function boneRadius(bone, end) {{
 function draw() {{
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  if (mode === 'contour') {{
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(90,210,140,.95)';
+    ctx.beginPath();
+    contour.forEach((p, i) => {{
+      const x = p[0] * scale, y = p[1] * scale;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }});
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(90,210,140,.12)';
+    ctx.fill();
+    contour.forEach((p, i) => {{
+      ctx.fillStyle = i === contourHover ? '#e8b33a' : '#3ad48a';
+      ctx.beginPath();
+      ctx.arc(p[0] * scale, p[1] * scale, i === contourHover ? 6 : 4, 0, 7);
+      ctx.fill();
+    }});
+    document.getElementById('hint').textContent =
+      'узлов: ' + contour.length + ' · контур заменяет автоматику целиком';
+    return;
+  }}
 
   if (mode === 'silhouette') {{
     // что конвейер считает телом — поверх арта, чтобы промахи было видно
@@ -220,9 +251,53 @@ function paintAt(p) {{
   strokeCtx.fill();
 }}
 
+function nearestNode(p) {{
+  let best = -1, bestDistance = 12 / scale;
+  contour.forEach((q, i) => {{
+    const d = Math.hypot(q[0] - p.x, q[1] - p.y);
+    if (d < bestDistance) {{ best = i; bestDistance = d; }}
+  }});
+  return best;
+}}
+
+function nearestEdge(p) {{
+  let best = -1, bestDistance = 14 / scale;
+  for (let i = 0; i < contour.length; i++) {{
+    const a = contour[i], b = contour[(i + 1) % contour.length];
+    const vx = b[0] - a[0], vy = b[1] - a[1];
+    const len2 = vx * vx + vy * vy || 1;
+    let t = ((p.x - a[0]) * vx + (p.y - a[1]) * vy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(a[0] + vx * t - p.x, a[1] + vy * t - p.y);
+    if (d < bestDistance) {{ best = i; bestDistance = d; }}
+  }}
+  return best;
+}}
+
 canvas.oncontextmenu = e => e.preventDefault();
+
+canvas.ondblclick = e => {{
+  if (mode !== 'contour') return;
+  const p = at(e);
+  const edge = nearestEdge(p);
+  if (edge >= 0) {{
+    contour.splice(edge + 1, 0, [p.x, p.y]);
+    contourHover = edge + 1;
+    draw();
+  }}
+}};
+
 canvas.onmousedown = e => {{
   const p = at(e);
+  if (mode === 'contour') {{
+    const node = nearestNode(p);
+    if (e.button === 2) {{
+      if (node >= 0 && contour.length > 3) {{ contour.splice(node, 1); draw(); }}
+      return;
+    }}
+    contourNode = node;
+    return;
+  }}
   if (mode === 'silhouette') {{
     painting = e.button === 2 ? 2 : 1;
     paintAt(p);
@@ -233,6 +308,12 @@ canvas.onmousedown = e => {{
 }};
 canvas.onmousemove = e => {{
   const p = at(e);
+  if (mode === 'contour') {{
+    if (contourNode !== null && contourNode >= 0) contour[contourNode] = [p.x, p.y];
+    else contourHover = nearestNode(p);
+    draw();
+    return;
+  }}
   if (mode === 'silhouette') {{
     if (painting) {{ paintAt(p); draw(); }}
     return;
@@ -241,9 +322,10 @@ canvas.onmousemove = e => {{
   else {{ hover = nearestBone(p); }}
   draw();
 }};
-window.onmouseup = () => {{ drag = null; painting = 0; }};
+window.onmouseup = () => {{ drag = null; painting = 0; contourNode = null; }};
 canvas.onwheel = e => {{
   e.preventDefault();
+  if (mode === 'contour') return;
   if (mode === 'silhouette') {{
     brush = Math.max(4, Math.min(200, brush * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
     draw();
@@ -256,11 +338,15 @@ canvas.onwheel = e => {{
   draw();
 }};
 
+document.getElementById('tab-contour').onclick = () => setMode('contour');
 document.getElementById('tab-silhouette').onclick = () => setMode('silhouette');
 document.getElementById('tab-skeleton').onclick = () => setMode('skeleton');
 
-document.getElementById('reset').onclick = () => {{
-  if (mode === 'silhouette') {{
+document.getElementById('reset').onclick = async () => {{
+  if (mode === 'contour') {{
+    const fetched = await (await fetch('contour.json?auto=1&' + Date.now())).json();
+    contour = fetched.points || [];
+  }} else if (mode === 'silhouette') {{
     strokeCtx.clearRect(0, 0, strokes.width, strokes.height);
   }} else {{
     joints = JSON.parse(JSON.stringify(base));
@@ -282,8 +368,10 @@ function payload() {{
     joints: deltas,
     radius_scale: scales,
     strokes: strokes ? strokes.toDataURL('image/png') : null,
+    contour: mode === 'contour' ? contour.map(p => [
+      Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]) : null,
     // правка силуэта тянет за собой весь конвейер, правка скелета — часть
-    start: mode === 'silhouette' ? 'background' : 'pose',
+    start: mode === 'skeleton' ? 'pose' : 'background',
   }};
 }}
 
@@ -359,6 +447,18 @@ class _Handler(BaseHTTPRequestHandler):
         if path in ("", "index.html"):
             page = PAGE.format(name=self.character.name)
             return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+        if path == "contour.json":
+            character = self.character
+            saved = character.contour_overrides
+            fresh = "auto=1" in self.path
+            if saved.exists() and not fresh:
+                points = character.read_json(saved).get("points", [])
+            else:
+                from .stages.background import extract_contour
+
+                points = extract_contour(character.read_mask(character.silhouette))
+            body = json.dumps({"points": points}, ensure_ascii=False).encode("utf-8")
+            return self._send(200, body, CONTENT_TYPES[".json"])
         if path == "bones.json":
             skeleton = self.character.read_json(self.character.skeleton)
             template = templates.get(skeleton["template"])
@@ -398,6 +498,17 @@ class _Handler(BaseHTTPRequestHandler):
 
         self.character.write_json(self.character.skeleton_overrides, overrides)
         painted = _save_strokes(self.character, payload.get("strokes"))
+        points = payload.get("contour")
+        if isinstance(points, list) and len(points) >= 3:
+            # вместе с контуром пишем хеш арта: если картинку перегенерят,
+            # правка окажется не про неё, и конвейер это заметит
+            self.character.write_json(
+                self.character.contour_overrides,
+                {
+                    "source": self.character.source_digest(),
+                    "points": [[float(x), float(y)] for x, y in points],
+                },
+            )
         print(
             f"  сохранено: суставов {len(overrides['joints'])}, "
             f"толщин {len(overrides['radius_scale'])}"

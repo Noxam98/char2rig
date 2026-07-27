@@ -74,6 +74,35 @@ def _flood_from_border(rgba: np.ndarray) -> np.ndarray:
     return ((~background) * 255).astype(np.uint8)
 
 
+def extract_contour(alpha: np.ndarray, simplify: float = 0.0015) -> list[list[float]]:
+    """Внешний контур силуэта как многоугольник — то, что человек будет править.
+
+    Упрощение подобрано так, чтобы узлов было сотня-полторы: по узлу на
+    каждый изгиб уха или пальца, но не по узлу на пиксель.
+    """
+    binary = (alpha > 16).astype(np.uint8)
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return []
+    biggest = max(contours, key=cv2.contourArea)
+    epsilon = simplify * cv2.arcLength(biggest, True)
+    points = cv2.approxPolyDP(biggest, epsilon, True).reshape(-1, 2)
+    return [[float(x), float(y)] for x, y in points]
+
+
+def rasterize_contour(
+    points: list[list[float]], shape: tuple[int, int], feather: float = 1.0
+) -> np.ndarray:
+    """Многоугольник → маска со сглаженным краем."""
+    mask = np.zeros(shape, dtype=np.uint8)
+    if len(points) >= 3:
+        polygon = np.array(points, dtype=np.int32).reshape(-1, 1, 2)
+        cv2.fillPoly(mask, [polygon], 255, cv2.LINE_AA)
+    if feather > 0:
+        mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=feather)
+    return mask
+
+
 def _apply_strokes(alpha: np.ndarray, strokes: np.ndarray | None) -> np.ndarray:
     """Наложить ручные мазки: 255 — это тело, 128 — это фон.
 
@@ -92,12 +121,20 @@ def run(
     rgba: np.ndarray,
     use_ml: bool = True,
     strokes: np.ndarray | None = None,
+    contour: list[list[float]] | None = None,
 ) -> tuple[np.ndarray, str, bool]:
     """Вернуть (альфа uint8, название метода, был ли это фоллбек).
 
     Чистка бинарная, но сглаженный край исходной альфы сохраняется: по нему
     потом режутся слои, и лесенка на контуре вылезла бы в каждом кадре.
+
+    Поправленный руками контур заменяет автоматику целиком: человек, который
+    подвинул узлы, знает про этот арт больше, чем сеть.
     """
+    if contour:
+        drawn = rasterize_contour(contour, rgba.shape[:2])
+        return _apply_strokes(drawn, strokes), "hand_contour", True
+
     if _has_alpha(rgba):
         soft = rgba[..., 3]
         return _apply_strokes(np.minimum(_clean(soft), soft), strokes), (

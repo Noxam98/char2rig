@@ -48,10 +48,27 @@ def run_pipeline(
             if char.silhouette_overrides.exists()
             else None
         )
-        alpha, method, fallback = background.run(rgba, use_ml, strokes)
+        contour, stale = None, False
+        if char.contour_overrides.exists():
+            saved_contour = char.read_json(char.contour_overrides)
+            contour = saved_contour.get("points") or None
+            # арт перегенерили — правка контура больше не про эту картинку;
+            # не применяем молча, а помечаем (принцип №1 в DESIGN.md)
+            stale = saved_contour.get("source") not in ("", char.source_digest())
+            if stale:
+                say("  ! контур правился под другой арт — правка не применена")
+                contour = None
+        alpha, method, fallback = background.run(rgba, use_ml, strokes, contour)
         char.write_mask(char.silhouette, alpha)
         painted = int((strokes > 64).sum()) if strokes is not None else 0
-        char.record_stage("background", method, fallback, painted_px=painted)
+        char.record_stage(
+            "background",
+            method,
+            fallback,
+            painted_px=painted,
+            contour_points=len(contour or []),
+            contour_stale=stale,
+        )
         hand = f", правок кистью {painted} px" if painted else ""
         say(f"  фон:      {method}{' (фоллбек)' if fallback else ''}{hand}")
     else:

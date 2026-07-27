@@ -61,6 +61,19 @@ class Character:
         return self.root / "silhouette.overrides.png"
 
     @property
+    def contour_overrides(self) -> Path:
+        """Поправленный руками контур силуэта: многоугольник плюс хеш арта."""
+        return self.root / "silhouette.contour.json"
+
+    def source_digest(self) -> str:
+        """Хеш исходника: по нему видно, что арт перегенерили и правки устарели."""
+        import hashlib
+
+        if not self.source.exists():
+            return ""
+        return hashlib.sha256(self.source.read_bytes()).hexdigest()[:16]
+
+    @property
     def skeleton(self) -> Path:
         return self.root / "skeleton.json"
 
