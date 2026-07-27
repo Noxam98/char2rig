@@ -14,11 +14,12 @@
 при взмахе руки выставляет наружу прямоугольный обрубок; шапка же уходит
 ровно туда, где сустав и открывается.
 
-Пиксели заезда берутся прямо из исходника (там настоящий мех соседа), а не
-достраиваются — на стыке это честнее любого inpaint. Достраивается только
-узкая кайма за пределами силуэта, чтобы при отведении конечности из-под неё
-не выглядывал фон. Полноценный inpaint скрытых областей (LaMa) — шаг
-«ML-обвязка» в PLAN.md.
+Пиксели заезда на прямого соседа (родителя или ребёнка) берутся из
+исходника: на стыке настоящий мех соседа честнее любого inpaint. А вот
+область, закрытую чужой частью спереди — рука, легшая поперёк торса, —
+восстановить нечем, и её достраивает LaMa; без модели там остаются
+исходные пиксели чужой части. Узкая кайма за силуэтом всегда достраивается
+ближайшим пикселем, чтобы при отведении конечности не выглядывал фон.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from . import note_fallback
 from ..geometry import pixel_grid
 from ..template import Bone, Template
 
@@ -71,6 +73,39 @@ def _overlap_map(
     return result
 
 
+def _occluders(template: Template, bone: Bone) -> list[str]:
+    """Части, которые лежат поверх этой и не являются ей роднёй.
+
+    Родитель и дети не считаются: их нахлёст на стыке — это тот самый
+    настоящий мех, ради которого нарезка и делается с заездом.
+    """
+    kin = {bone.parent, bone.name} | {
+        b.name for b in template.bones if b.parent == bone.name
+    }
+    return [b.name for b in template.bones if b.z > bone.z and b.name not in kin]
+
+
+_LAMA = None
+
+
+def _try_lama(rgb: np.ndarray, hidden: np.ndarray) -> np.ndarray | None:
+    """Достроить скрытую область через LaMa; None, если модели нет."""
+    global _LAMA
+    try:
+        from simple_lama_inpainting import SimpleLama
+    except ImportError:
+        note_fallback("слои", "simple-lama-inpainting не установлен")
+        return None
+    try:
+        if _LAMA is None:
+            _LAMA = SimpleLama()
+        out = _LAMA(rgb, (hidden * 255).astype(np.uint8))
+    except Exception as exc:
+        note_fallback("слои", f"LaMa упала: {type(exc).__name__}: {exc}")
+        return None
+    return np.array(out)[..., :3]
+
+
 def _fill_outside(rgb: np.ndarray, unknown: np.ndarray) -> np.ndarray:
     """Кайма за силуэтом — цветом ближайшего известного пикселя.
 
@@ -98,6 +133,7 @@ def run(
     joints: dict[str, tuple[float, float]],
     masks: dict[str, np.ndarray],
     unit: float,
+    use_ml: bool = True,
 ) -> tuple[dict[str, dict], str, bool, dict]:
     """Вернуть (слои, метод, фоллбек ли, статистика).
 
@@ -117,6 +153,8 @@ def run(
     coverage = np.zeros(shape, dtype=bool)
     layers: dict[str, dict] = {}
     filled_px = 0
+    hidden_px = 0
+    lama_used = False
 
     for bone in template.bones:
         own = masks[bone.name] > 127
@@ -140,6 +178,19 @@ def run(
         filled_px += int(unknown.sum())
         part_rgb = _fill_outside(rgb, unknown) if unknown.any() else rgb
 
+        # область, закрытую чужой частью спереди, честно достроить нечем —
+        # там лежат её пиксели, а не наши; отдаём LaMa, если она есть
+        covers = [masks[o] > 127 for o in _occluders(template, bone)]
+        hidden = region & np.logical_or.reduce(
+            covers or [np.zeros(shape, dtype=bool)]
+        )
+        hidden_px += int(hidden.sum())
+        if use_ml and hidden.any():
+            restored = _try_lama(part_rgb, hidden)
+            if restored is not None:
+                part_rgb = np.where(hidden[..., None], restored, part_rgb)
+                lama_used = True
+
         ys, xs = np.nonzero(region)
         x0, x1 = int(xs.min()), int(xs.max()) + 1
         y0, y1 = int(ys.min()), int(ys.max()) + 1
@@ -155,6 +206,8 @@ def run(
         "layers": len(layers),
         "uncovered_px": uncovered,
         "uncovered_ratio": round(uncovered / max(int(silhouette.sum()), 1), 5),
-        "inpainted_px": filled_px,
+        "ring_px": filled_px,
+        "hidden_px": hidden_px,
     }
-    return layers, "overlap_cut+nearest_fill", True, stats
+    method = "overlap_cut+lama" if lama_used else "overlap_cut+nearest_fill"
+    return layers, method, not lama_used, stats

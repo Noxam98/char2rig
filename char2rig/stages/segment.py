@@ -11,18 +11,21 @@ SAM2 (ultralytics) подключается сверху: маски от нег
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
+from . import note_fallback
 from ..geometry import capsule_field, pixel_grid
-from ..template import Template
+from ..template import Template, pixels_per_unit
 
 
-def capsule_owner(
+def capsule_fields(
     shape: tuple[int, int],
     template: Template,
     joints: dict[str, tuple[float, float]],
 ) -> tuple[np.ndarray, list[str]]:
-    """Карта «какой кости принадлежит пиксель» + порядок имён костей."""
+    """Поля расстояний до капсул всех костей + порядок имён."""
     grid = pixel_grid(shape)
     unit = pixels_per_unit(joints, template)
     names = [b.name for b in template.bones]
@@ -39,54 +42,72 @@ def capsule_owner(
             for b in template.bones
         ]
     )
+    return fields, names
+
+
+def capsule_owner(
+    shape: tuple[int, int],
+    template: Template,
+    joints: dict[str, tuple[float, float]],
+) -> tuple[np.ndarray, list[str]]:
+    """Карта «какой кости принадлежит пиксель» + порядок имён костей."""
+    fields, names = capsule_fields(shape, template, joints)
     return np.argmin(fields, axis=0).astype(np.int16), names
 
 
-def pixels_per_unit(
-    joints: dict[str, tuple[float, float]], template: Template
-) -> float:
-    """Пикселей на единицу нормировки шаблона (рост персонажа).
 
-    Радиусы в шаблоне заданы в долях роста, а суставы уже в пикселях —
-    масштаб восстанавливаем по длинам костей. Берём медиану, а не максимум:
-    шаблон мог быть растянут по ширине, и горизонтальные кости тогда врут.
-    """
-    ratios = []
-    for bone in template.bones:
-        ax, ay = joints[bone.a]
-        bx, by = joints[bone.b]
-        nx, ny = template.joints[bone.a]
-        mx, my = template.joints[bone.b]
-        norm = float(np.hypot(mx - nx, my - ny))
-        if norm < 1e-3:
-            continue
-        ratios.append(float(np.hypot(bx - ax, by - ay)) / norm)
-    return float(np.median(ratios)) if ratios else 1.0
+
+_SAM = None
+
+# SAM2 по подсказке из одной кости часто отдаёт весь силуэт целиком: на
+# замерах по демо-коту так вышло для торса и плеча (98% силуэта), зато
+# кисти и стопы он ловит с IoU 0.86–0.95. Поэтому маска принимается, только
+# если она правдоподобна как часть — иначе тут решают капсулы.
+SAM_MAX_AREA = 2.0  # во сколько раз маска может быть больше своей капсулы
+SAM_MIN_IOU = 0.5  # и насколько обязана совпасть с тем, где мы ждём часть
+
+# веса кладём в models/ (в .gitignore): ultralytics по умолчанию сыплет их
+# в текущую папку, а 154 МБ в корне репы GitHub не принимает
+SAM_WEIGHTS = Path("models/sam2_b.pt")
 
 
 def _try_sam2(
     rgb: np.ndarray,
     joints: dict[str, tuple[float, float]],
     template: Template,
+    capsules: dict[str, np.ndarray],
 ) -> dict[str, np.ndarray] | None:
-    """Маски частей от SAM2 по подсказкам-точкам из костей; None если нет модели."""
+    """Правдоподобные маски частей от SAM2 (может вернуть часть костей)."""
+    global _SAM
     try:
         from ultralytics import SAM
     except ImportError:
+        note_fallback("части", "ultralytics не установлен")
         return None
     try:
-        model = SAM("sam2_b.pt")
+        if _SAM is None:
+            SAM_WEIGHTS.parent.mkdir(parents=True, exist_ok=True)
+            _SAM = SAM(str(SAM_WEIGHTS))
+        rgb = np.ascontiguousarray(rgb)
         masks: dict[str, np.ndarray] = {}
         for bone in template.bones:
             ax, ay = joints[bone.a]
             bx, by = joints[bone.b]
-            point = [[(ax + bx) / 2, (ay + by) / 2]]
-            result = model(rgb, points=point, labels=[1], verbose=False)[0]
+            axis = [
+                [ax + (bx - ax) * t, ay + (by - ay) * t] for t in (0.3, 0.5, 0.7)
+            ]
+            result = _SAM(rgb, points=axis, labels=[1, 1, 1], verbose=False)[0]
             if result.masks is None or len(result.masks.data) == 0:
-                return None
-            masks[bone.name] = result.masks.data[0].cpu().numpy() > 0.5
-        return masks
-    except Exception:
+                continue
+            mask = result.masks.data[0].cpu().numpy() > 0.5
+            capsule = capsules[bone.name]
+            area, expected = int(mask.sum()), max(int(capsule.sum()), 1)
+            iou = int((mask & capsule).sum()) / max(int((mask | capsule).sum()), 1)
+            if area <= SAM_MAX_AREA * expected and iou >= SAM_MIN_IOU:
+                masks[bone.name] = mask
+        return masks or None
+    except Exception as exc:
+        note_fallback("части", f"SAM2 упал: {type(exc).__name__}: {exc}")
         return None
 
 
@@ -100,15 +121,29 @@ def run(
     """Вернуть (маски частей, метод, фоллбек ли, статистика)."""
     shape = alpha.shape
     silhouette = alpha > 16
-    owner, names = capsule_owner(shape, template, joints)
+    fields, names = capsule_fields(shape, template, joints)
+    owner = np.argmin(fields, axis=0).astype(np.int16)
+    capsules = {n: (fields[i] < 0) & silhouette for i, n in enumerate(names)}
 
-    sam_masks = _try_sam2(rgba[..., :3], joints, template) if use_ml else None
-    if sam_masks is not None:
-        # SAM2 даёт границы, капсулы — арбитраж: где маска ровно одна, верим
-        # ей; где их несколько или ни одной — остаётся ближайшая капсула.
-        votes = np.stack([sam_masks[n] for n in names])
-        count = votes.sum(axis=0)
-        owner = np.where(count == 1, np.argmax(votes, axis=0), owner).astype(np.int16)
+    sam_masks = (
+        _try_sam2(rgba[..., :3], joints, template, capsules) if use_ml else None
+    )
+    accepted: list[str] = []
+    if sam_masks:
+        # SAM2 знает, что «это лапа», но не знает, что рогом вращения будет
+        # голеностоп: его граница части проходит не по суставу, и перенос
+        # пикселей через неё ломает риг — часть уезжает не вокруг того сустава.
+        # Поэтому разрезы по суставам остаются за капсулами, а SAM2 решает
+        # только на окраинах, куда скелет не дотянулся: клочья шерсти, уши,
+        # одежда. Там правило «ближайшая капсула» — всё равно гадание.
+        outskirts = fields.min(axis=0) > 0
+        accepted = [n for n in names if n in sam_masks]
+        index = np.array([names.index(n) for n in accepted], dtype=np.int16)
+        votes = np.stack([sam_masks[n] for n in accepted])
+        single = (votes.sum(axis=0) == 1) & outskirts
+        owner = np.where(single, index[np.argmax(votes, axis=0)], owner).astype(
+            np.int16
+        )
         method, fallback = "sam2+capsules", False
     else:
         method, fallback = "capsules", True
@@ -119,6 +154,7 @@ def run(
     }
     stats = {
         "parts": len(masks),
+        "sam_parts": accepted,
         "empty_parts": sorted(n for n, m in masks.items() if m.max() == 0),
         "silhouette_px": int(silhouette.sum()),
     }

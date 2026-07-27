@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..template import Template, extent
+from . import note_fallback
+from ..geometry import capsule_field, pixel_grid
+from ..template import Template, extent, pixels_per_unit
 
 # rtmlib отдаёт COCO-17; «left» — сторона персонажа, во фронтальном арте
 # это правая половина картинки, как и `_l` в шаблоне.
@@ -83,18 +85,31 @@ def fit_bbox(template: Template, alpha: np.ndarray) -> tuple[dict, dict]:
     return joints, params
 
 
+_POSE_MODEL = None
+
+
 def _try_dwpose(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
-    """(keypoints[17,2], scores[17]) от DWPose или None, если недоступно."""
+    """(keypoints[17,2], scores[17]) от RTMPose или None, если недоступно.
+
+    Берём `Body`, а не `Wholebody`: лицо и пальцы нам не нужны, а модель
+    вдвое легче. Первые 17 точек в обоих — один и тот же COCO-порядок.
+    Модель весит недёшево и грузится один раз на процесс.
+    """
+    global _POSE_MODEL
     try:
-        from rtmlib import Wholebody
+        from rtmlib import Body
     except ImportError:
+        note_fallback("скелет", "rtmlib не установлен")
         return None
     try:
-        model = Wholebody(mode="balanced", backend="onnxruntime", device="cpu")
-        keypoints, scores = model(rgb[..., ::-1])  # rtmlib ждёт BGR
-    except Exception:
+        if _POSE_MODEL is None:
+            _POSE_MODEL = Body(mode="balanced", backend="onnxruntime", device="cpu")
+        keypoints, scores = _POSE_MODEL(np.ascontiguousarray(rgb[..., ::-1]))
+    except Exception as exc:
+        note_fallback("скелет", f"rtmlib упал: {type(exc).__name__}: {exc}")
         return None
     if keypoints is None or len(keypoints) == 0:
+        note_fallback("скелет", "детектор никого не нашёл")
         return None
     return np.asarray(keypoints[0], dtype=float), np.asarray(scores[0], dtype=float)
 
@@ -128,6 +143,45 @@ def _similarity_to(
     return scale, shift
 
 
+FIT_SCALE = 0.4  # совпадение с силуэтом считаем в уменьшенном разрешении
+
+
+def _agreement(
+    template: Template, joints: dict[str, tuple[float, float]], alpha: np.ndarray
+) -> float:
+    """IoU «тела по скелету» с силуэтом: насколько посадка вообще про этот арт.
+
+    Считаем именно по капсулам, а не по попаданию суставов внутрь силуэта:
+    сустав может лежать в силуэте, а капсула вокруг него — торчать наружу,
+    и потом ровно это вылезает щелями в стресс-тесте.
+    """
+    import cv2
+
+    small = cv2.resize(
+        alpha, None, fx=FIT_SCALE, fy=FIT_SCALE, interpolation=cv2.INTER_AREA
+    )
+    shape = small.shape
+    grid = pixel_grid(shape)
+    scaled = {k: (x * FIT_SCALE, y * FIT_SCALE) for k, (x, y) in joints.items()}
+    unit = pixels_per_unit(scaled, template)
+    body = np.zeros(shape, dtype=bool)
+    for bone in template.bones:
+        body |= (
+            capsule_field(
+                shape,
+                scaled[bone.a],
+                scaled[bone.b],
+                bone.ra * unit,
+                bone.rb * unit,
+                grid=grid,
+            )
+            < 0
+        )
+    silhouette = small > 16
+    union = int((body | silhouette).sum())
+    return int((body & silhouette).sum()) / max(union, 1)
+
+
 def run(
     template: Template,
     rgba: np.ndarray,
@@ -143,15 +197,31 @@ def run(
         detected = _try_dwpose(rgba[..., :3])
         if detected is not None:
             fitted = _similarity_to(joints, *detected)
-            if fitted is not None:
+            if fitted is None:
+                note_fallback("скелет", "мало уверенных ключевых точек")
+            else:
                 scale, (dx, dy) = fitted
-                joints = {
+                moved = {
                     name: (x * scale + dx, y * scale + dy)
                     for name, (x, y) in joints.items()
                 }
-                params["dwpose_scale"] = round(scale, 3)
-                params["dwpose_conf"] = round(float(np.mean(detected[1])), 3)
-                method, fallback = "bbox_fit+dwpose", False
+                # детектор обучен на людях: на антропоморфе он может уехать
+                # куда угодно. Берём ту посадку, которая лучше совпала с
+                # силуэтом — торчащая наружу капсула потом вылезает щелями
+                before = _agreement(template, joints, alpha)
+                after = _agreement(template, moved, alpha)
+                params["fit_iou"] = round(max(before, after), 3)
+                if after <= before:
+                    note_fallback(
+                        "скелет",
+                        f"DWPose сел хуже посадки по bbox (IoU {after:.2f} "
+                        f"против {before:.2f})",
+                    )
+                else:
+                    joints = moved
+                    params["dwpose_scale"] = round(scale, 3)
+                    params["dwpose_conf"] = round(float(np.mean(detected[1])), 3)
+                    method, fallback = "bbox_fit+dwpose", False
 
     # принцип №1: ручные правки — оверлеи поверх автоматики
     for name, delta in (overrides or {}).get("joints", {}).items():

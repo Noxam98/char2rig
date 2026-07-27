@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import note_fallback
+
 try:  # cv2 — часть ядра, но пусть падает внятно
     import cv2
 except ImportError as exc:  # pragma: no cover
@@ -46,13 +48,16 @@ def _try_rembg(rgba: np.ndarray) -> np.ndarray | None:
     try:
         from rembg import remove as rembg_remove
     except ImportError:
+        note_fallback("фон", "rembg не установлен")
         return None
     try:
-        out = np.array(rembg_remove(rgba[..., :3]))
-    except Exception:  # модель не скачалась, нет сети и т.п.
+        out = np.array(rembg_remove(np.ascontiguousarray(rgba[..., :3])))
+    except Exception as exc:  # модель не скачалась, нет сети и т.п.
+        note_fallback("фон", f"rembg упал: {type(exc).__name__}: {exc}")
         return None
     if out.ndim == 3 and out.shape[2] == 4:
         return out[..., 3]
+    note_fallback("фон", "rembg вернул кадр без альфы")
     return None
 
 

@@ -84,12 +84,12 @@ def run_pipeline(
 
     if _from(start, "layers"):
         cut, method, fallback, stats = layers.run(
-            template, rgba, alpha, joints, masks, unit
+            template, rgba, alpha, joints, masks, unit, use_ml
         )
         char.record_stage("layers", method, fallback, **stats)
         say(
-            f"  слои:     {stats['layers']} шт, непокрытых пикселей "
-            f"{stats['uncovered_px']}, достроено {stats['inpainted_px']}"
+            f"  слои:     {stats['layers']} шт ({method}), непокрытых пикселей "
+            f"{stats['uncovered_px']}, скрытых {stats['hidden_px']}"
         )
         rig_data = rig.run(char, template, joints, cut, (width, height), unit)
         char.record_stage("rig", "joint_pivots", False, bones=len(rig_data["bones"]))
@@ -103,8 +103,9 @@ def run_pipeline(
     verdict = render.triage(checks)
     char.record_checks(checks, verdict)
     say(
-        f"  свинг:    {checks['frames']} кадров, щели {checks['gap_px']} px "
-        f"({checks['gap_ratio']:.3%}, худший кадр {checks['worst_frame']}) → {verdict}"
+        f"  свинг:    {checks['frames']} кадров, посадка "
+        f"{checks['fit_gap_ratio']:.3%}, швы {checks['seam_gap_ratio']:.3%} "
+        f"(худший кадр {checks['worst_frame']}) → {verdict}"
     )
     say(f"  готово:   {char.preview}")
     return checks
@@ -162,8 +163,8 @@ def cmd_swing(args: argparse.Namespace) -> int:
     verdict = render.triage(checks)
     char.record_checks(checks, verdict)
     say(
-        f"свинг {args.name}: щели {checks['gap_px']} px "
-        f"({checks['gap_ratio']:.3%}, худший кадр {checks['worst_frame']}) → {verdict}"
+        f"свинг {args.name}: посадка {checks['fit_gap_ratio']:.3%}, "
+        f"швы {checks['seam_gap_ratio']:.3%} → {verdict}"
     )
     return 0
 

@@ -12,6 +12,7 @@ weights/
 *.safetensors
 *.onnx
 *.pth
+*.pt
 
 # Рабочие выходы вне персонажей
 outputs/

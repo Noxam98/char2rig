@@ -1,0 +1,625 @@
+{
+  "template": "biped_tail",
+  "size": [
+    512,
+    768
+  ],
+  "unit": 669.2,
+  "chains": {
+    "tail": [
+      "tail_1",
+      "tail_2",
+      "tail_3"
+    ],
+    "leg_digitigrade": [
+      "foot_l",
+      "foot_r"
+    ]
+  },
+  "joints": {
+    "head_top": [
+      256.5,
+      91.23
+    ],
+    "neck": [
+      256.5,
+      215.03
+    ],
+    "pelvis": [
+      256.5,
+      419.13
+    ],
+    "shoulder_l": [
+      313.38,
+      248.49
+    ],
+    "elbow_l": [
+      376.96,
+      338.83
+    ],
+    "wrist_l": [
+      427.15,
+      419.13
+    ],
+    "hand_l": [
+      453.92,
+      462.63
+    ],
+    "shoulder_r": [
+      199.62,
+      248.49
+    ],
+    "elbow_r": [
+      136.04,
+      338.83
+    ],
+    "wrist_r": [
+      85.85,
+      419.13
+    ],
+    "hand_r": [
+      59.08,
+      462.63
+    ],
+    "hip_l": [
+      296.65,
+      425.82
+    ],
+    "knee_l": [
+      323.42,
+      516.17
+    ],
+    "hock_l": [
+      300.0,
+      606.51
+    ],
+    "toe_l": [
+      323.42,
+      716.92
+    ],
+    "hip_r": [
+      216.35,
+      425.82
+    ],
+    "knee_r": [
+      189.58,
+      516.17
+    ],
+    "hock_r": [
+      213.0,
+      606.51
+    ],
+    "toe_r": [
+      189.58,
+      716.92
+    ],
+    "tail_a": [
+      224.38,
+      435.86
+    ],
+    "tail_b": [
+      142.73,
+      496.09
+    ],
+    "tail_c": [
+      101.24,
+      579.74
+    ],
+    "tail_d": [
+      81.16,
+      660.04
+    ]
+  },
+  "bones": [
+    {
+      "name": "torso",
+      "parent": null,
+      "joints": [
+        "pelvis",
+        "neck"
+      ],
+      "rest_a": [
+        256.5,
+        419.13
+      ],
+      "rest_b": [
+        256.5,
+        215.03
+      ],
+      "rest_angle": -1.570796,
+      "length": 204.1,
+      "radius_a": 70.27,
+      "radius_b": 58.89,
+      "z": 20,
+      "image": "layers/torso.png",
+      "offset": [
+        168,
+        163
+      ],
+      "pivot": [
+        256.5,
+        419.13
+      ]
+    },
+    {
+      "name": "head",
+      "parent": "torso",
+      "joints": [
+        "neck",
+        "head_top"
+      ],
+      "rest_a": [
+        256.5,
+        215.03
+      ],
+      "rest_b": [
+        256.5,
+        91.23
+      ],
+      "rest_angle": -1.570796,
+      "length": 123.8,
+      "radius_a": 48.18,
+      "radius_b": 60.23,
+      "z": 40,
+      "image": "layers/head.png",
+      "offset": [
+        154,
+        29
+      ],
+      "pivot": [
+        256.5,
+        215.03
+      ]
+    },
+    {
+      "name": "arm_upper_r",
+      "parent": "torso",
+      "joints": [
+        "shoulder_r",
+        "elbow_r"
+      ],
+      "rest_a": [
+        199.62,
+        248.49
+      ],
+      "rest_b": [
+        136.04,
+        338.83
+      ],
+      "rest_angle": 2.184032,
+      "length": 110.47,
+      "radius_a": 32.12,
+      "radius_b": 26.77,
+      "z": 22,
+      "image": "layers/arm_upper_r.png",
+      "offset": [
+        103,
+        205
+      ],
+      "pivot": [
+        199.62,
+        248.49
+      ]
+    },
+    {
+      "name": "arm_upper_l",
+      "parent": "torso",
+      "joints": [
+        "shoulder_l",
+        "elbow_l"
+      ],
+      "rest_a": [
+        313.38,
+        248.49
+      ],
+      "rest_b": [
+        376.96,
+        338.83
+      ],
+      "rest_angle": 0.957561,
+      "length": 110.47,
+      "radius_a": 32.12,
+      "radius_b": 26.77,
+      "z": 26,
+      "image": "layers/arm_upper_l.png",
+      "offset": [
+        280,
+        205
+      ],
+      "pivot": [
+        313.38,
+        248.49
+      ]
+    },
+    {
+      "name": "thigh_r",
+      "parent": "torso",
+      "joints": [
+        "hip_r",
+        "knee_r"
+      ],
+      "rest_a": [
+        216.35,
+        425.82
+      ],
+      "rest_b": [
+        189.58,
+        516.17
+      ],
+      "rest_angle": 1.858868,
+      "length": 94.22,
+      "radius_a": 41.49,
+      "radius_b": 33.46,
+      "z": 8,
+      "image": "layers/thigh_r.png",
+      "offset": [
+        136,
+        375
+      ],
+      "pivot": [
+        216.35,
+        425.82
+      ]
+    },
+    {
+      "name": "thigh_l",
+      "parent": "torso",
+      "joints": [
+        "hip_l",
+        "knee_l"
+      ],
+      "rest_a": [
+        296.65,
+        425.82
+      ],
+      "rest_b": [
+        323.42,
+        516.17
+      ],
+      "rest_angle": 1.282725,
+      "length": 94.22,
+      "radius_a": 41.49,
+      "radius_b": 33.46,
+      "z": 12,
+      "image": "layers/thigh_l.png",
+      "offset": [
+        254,
+        375
+      ],
+      "pivot": [
+        296.65,
+        425.82
+      ]
+    },
+    {
+      "name": "tail_1",
+      "parent": "torso",
+      "joints": [
+        "tail_a",
+        "tail_b"
+      ],
+      "rest_a": [
+        224.38,
+        435.86
+      ],
+      "rest_b": [
+        142.73,
+        496.09
+      ],
+      "rest_angle": 2.506036,
+      "length": 101.46,
+      "radius_a": 24.09,
+      "radius_b": 18.74,
+      "z": -2,
+      "image": "layers/tail_1.png",
+      "offset": [
+        119,
+        446
+      ],
+      "pivot": [
+        224.38,
+        435.86
+      ]
+    },
+    {
+      "name": "arm_fore_r",
+      "parent": "arm_upper_r",
+      "joints": [
+        "elbow_r",
+        "wrist_r"
+      ],
+      "rest_a": [
+        136.04,
+        338.83
+      ],
+      "rest_b": [
+        85.85,
+        419.13
+      ],
+      "rest_angle": 2.129423,
+      "length": 94.7,
+      "radius_a": 26.77,
+      "radius_b": 21.41,
+      "z": 23,
+      "image": "layers/arm_fore_r.png",
+      "offset": [
+        62,
+        313
+      ],
+      "pivot": [
+        136.04,
+        338.83
+      ]
+    },
+    {
+      "name": "arm_fore_l",
+      "parent": "arm_upper_l",
+      "joints": [
+        "elbow_l",
+        "wrist_l"
+      ],
+      "rest_a": [
+        376.96,
+        338.83
+      ],
+      "rest_b": [
+        427.15,
+        419.13
+      ],
+      "rest_angle": 1.01217,
+      "length": 94.7,
+      "radius_a": 26.77,
+      "radius_b": 21.41,
+      "z": 27,
+      "image": "layers/arm_fore_l.png",
+      "offset": [
+        347,
+        313
+      ],
+      "pivot": [
+        376.96,
+        338.83
+      ]
+    },
+    {
+      "name": "shin_r",
+      "parent": "thigh_r",
+      "joints": [
+        "knee_r",
+        "hock_r"
+      ],
+      "rest_a": [
+        189.58,
+        516.17
+      ],
+      "rest_b": [
+        213.0,
+        606.51
+      ],
+      "rest_angle": 1.317108,
+      "length": 93.33,
+      "radius_a": 33.46,
+      "radius_b": 22.75,
+      "z": 9,
+      "image": "layers/shin_r.png",
+      "offset": [
+        147,
+        497
+      ],
+      "pivot": [
+        189.58,
+        516.17
+      ]
+    },
+    {
+      "name": "shin_l",
+      "parent": "thigh_l",
+      "joints": [
+        "knee_l",
+        "hock_l"
+      ],
+      "rest_a": [
+        323.42,
+        516.17
+      ],
+      "rest_b": [
+        300.0,
+        606.51
+      ],
+      "rest_angle": 1.824485,
+      "length": 93.33,
+      "radius_a": 33.46,
+      "radius_b": 22.75,
+      "z": 13,
+      "image": "layers/shin_l.png",
+      "offset": [
+        276,
+        496
+      ],
+      "pivot": [
+        323.42,
+        516.17
+      ]
+    },
+    {
+      "name": "tail_2",
+      "parent": "tail_1",
+      "joints": [
+        "tail_b",
+        "tail_c"
+      ],
+      "rest_a": [
+        142.73,
+        496.09
+      ],
+      "rest_b": [
+        101.24,
+        579.74
+      ],
+      "rest_angle": 2.031263,
+      "length": 93.37,
+      "radius_a": 18.74,
+      "radius_b": 13.38,
+      "z": -3,
+      "image": "layers/tail_2.png",
+      "offset": [
+        74,
+        481
+      ],
+      "pivot": [
+        142.73,
+        496.09
+      ]
+    },
+    {
+      "name": "hand_r",
+      "parent": "arm_fore_r",
+      "joints": [
+        "wrist_r",
+        "hand_r"
+      ],
+      "rest_a": [
+        85.85,
+        419.13
+      ],
+      "rest_b": [
+        59.08,
+        462.63
+      ],
+      "rest_angle": 2.122478,
+      "length": 51.07,
+      "radius_a": 24.09,
+      "radius_b": 20.08,
+      "z": 24,
+      "image": "layers/hand_r.png",
+      "offset": [
+        37,
+        390
+      ],
+      "pivot": [
+        85.85,
+        419.13
+      ]
+    },
+    {
+      "name": "hand_l",
+      "parent": "arm_fore_l",
+      "joints": [
+        "wrist_l",
+        "hand_l"
+      ],
+      "rest_a": [
+        427.15,
+        419.13
+      ],
+      "rest_b": [
+        453.92,
+        462.63
+      ],
+      "rest_angle": 1.019115,
+      "length": 51.07,
+      "radius_a": 24.09,
+      "radius_b": 20.08,
+      "z": 28,
+      "image": "layers/hand_l.png",
+      "offset": [
+        396,
+        390
+      ],
+      "pivot": [
+        427.15,
+        419.13
+      ]
+    },
+    {
+      "name": "foot_r",
+      "parent": "shin_r",
+      "joints": [
+        "hock_r",
+        "toe_r"
+      ],
+      "rest_a": [
+        213.0,
+        606.51
+      ],
+      "rest_b": [
+        189.58,
+        716.92
+      ],
+      "rest_angle": 1.779831,
+      "length": 112.87,
+      "radius_a": 22.75,
+      "radius_b": 20.08,
+      "z": 10,
+      "image": "layers/foot_r.png",
+      "offset": [
+        168,
+        587
+      ],
+      "pivot": [
+        213.0,
+        606.51
+      ]
+    },
+    {
+      "name": "foot_l",
+      "parent": "shin_l",
+      "joints": [
+        "hock_l",
+        "toe_l"
+      ],
+      "rest_a": [
+        300.0,
+        606.51
+      ],
+      "rest_b": [
+        323.42,
+        716.92
+      ],
+      "rest_angle": 1.361761,
+      "length": 112.87,
+      "radius_a": 22.75,
+      "radius_b": 20.08,
+      "z": 14,
+      "image": "layers/foot_l.png",
+      "offset": [
+        276,
+        587
+      ],
+      "pivot": [
+        300.0,
+        606.51
+      ]
+    },
+    {
+      "name": "tail_3",
+      "parent": "tail_2",
+      "joints": [
+        "tail_c",
+        "tail_d"
+      ],
+      "rest_a": [
+        101.24,
+        579.74
+      ],
+      "rest_b": [
+        81.16,
+        660.04
+      ],
+      "rest_angle": 1.815789,
+      "length": 82.78,
+      "radius_a": 13.38,
+      "radius_b": 6.69,
+      "z": -4,
+      "image": "layers/tail_3.png",
+      "offset": [
+        73,
+        569
+      ],
+      "pivot": [
+        101.24,
+        579.74
+      ]
+    }
+  ]
+}

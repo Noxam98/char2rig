@@ -193,7 +193,7 @@
       "z": 22,
       "image": "layers/arm_upper_r.png",
       "offset": [
-        103,
+        72,
         206
       ],
       "pivot": [
@@ -403,7 +403,7 @@
       "z": 9,
       "image": "layers/shin_r.png",
       "offset": [
-        154,
+        147,
         497
       ],
       "pivot": [
@@ -463,7 +463,7 @@
       "z": -3,
       "image": "layers/tail_2.png",
       "offset": [
-        85,
+        73,
         482
       ],
       "pivot": [
@@ -523,7 +523,7 @@
       "z": 28,
       "image": "layers/hand_l.png",
       "offset": [
-        397,
+        396,
         391
       ],
       "pivot": [
@@ -584,7 +584,7 @@
       "image": "layers/foot_l.png",
       "offset": [
         275,
-        590
+        587
       ],
       "pivot": [
         299.99,

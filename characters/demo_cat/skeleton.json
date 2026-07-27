@@ -12,7 +12,8 @@
       707
     ],
     "scale": 670.142,
-    "x_scale": 0.999
+    "x_scale": 0.999,
+    "fit_iou": 0.951
   },
   "joints": {
     "head_top": [

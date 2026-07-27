@@ -5,12 +5,12 @@
     "background": {
       "method": "source_alpha",
       "fallback": true,
-      "at": "2026-07-27T18:26:52+03:00"
+      "at": "2026-07-27T19:26:21+03:00"
     },
     "pose": {
       "method": "bbox_fit",
       "fallback": true,
-      "at": "2026-07-27T18:26:52+03:00",
+      "at": "2026-07-27T19:26:22+03:00",
       "bbox": [
         39,
         31,
@@ -18,40 +18,56 @@
         707
       ],
       "scale": 670.142,
-      "x_scale": 0.999
+      "x_scale": 0.999,
+      "fit_iou": 0.951
     },
     "segment": {
-      "method": "capsules",
-      "fallback": true,
-      "at": "2026-07-27T18:26:52+03:00",
+      "method": "sam2+capsules",
+      "fallback": false,
+      "at": "2026-07-27T19:26:33+03:00",
       "parts": 17,
+      "sam_parts": [
+        "torso",
+        "arm_upper_r",
+        "hand_r",
+        "arm_upper_l",
+        "hand_l",
+        "shin_r",
+        "foot_r",
+        "shin_l",
+        "foot_l",
+        "tail_2"
+      ],
       "empty_parts": [],
       "silhouette_px": 117661
     },
     "layers": {
-      "method": "overlap_cut+nearest_fill",
-      "fallback": true,
-      "at": "2026-07-27T18:26:53+03:00",
+      "method": "overlap_cut+lama",
+      "fallback": false,
+      "at": "2026-07-27T19:26:38+03:00",
       "layers": 17,
       "uncovered_px": 0,
       "uncovered_ratio": 0.0,
-      "inpainted_px": 8722
+      "ring_px": 9028,
+      "hidden_px": 618
     },
     "rig": {
       "method": "joint_pivots",
       "fallback": false,
-      "at": "2026-07-27T18:26:53+03:00",
+      "at": "2026-07-27T19:26:38+03:00",
       "bones": 17
     }
   },
   "checks": {
     "frames": 24,
-    "gap_px": 4,
-    "gap_ratio": 4e-05,
+    "fit_gap_px": 0,
+    "fit_gap_ratio": 0.0,
+    "seam_gap_px": 4,
+    "seam_gap_ratio": 4e-05,
     "worst_frame": 14,
     "uncovered_px": 0,
     "uncovered_ratio": 0.0
   },
-  "updated": "2026-07-27T18:27:09+03:00",
+  "updated": "2026-07-27T19:26:56+03:00",
   "triage": "green"
 }

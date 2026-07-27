@@ -159,6 +159,34 @@ def get(name: str) -> Template:
     return TEMPLATES[name]
 
 
+def pixels_per_unit(
+    joints: dict[str, tuple[float, float]], template: Template
+) -> float:
+    """Пикселей на единицу нормировки шаблона (рост персонажа).
+
+    Радиусы в шаблоне заданы в долях роста, а посаженные суставы уже в
+    пикселях — масштаб восстанавливаем по длинам костей. Берём медиану, а не
+    максимум: шаблон мог быть растянут по ширине, и горизонтальные кости
+    тогда врут.
+    """
+    ratios = []
+    for bone in template.bones:
+        ax, ay = joints[bone.a]
+        bx, by = joints[bone.b]
+        nx, ny = template.joints[bone.a]
+        mx, my = template.joints[bone.b]
+        norm = float(((mx - nx) ** 2 + (my - ny) ** 2) ** 0.5)
+        if norm > 1e-3:
+            ratios.append(float(((bx - ax) ** 2 + (by - ay) ** 2) ** 0.5) / norm)
+    if not ratios:
+        return 1.0
+    ratios.sort()
+    middle = len(ratios) // 2
+    if len(ratios) % 2:
+        return ratios[middle]
+    return (ratios[middle - 1] + ratios[middle]) / 2
+
+
 def extent(
     template: Template, x_scale: float = 1.0
 ) -> tuple[float, float, float, float]:

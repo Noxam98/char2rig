@@ -172,6 +172,13 @@ def swing(
     pad_x = pad_y = round(max(width, height) * PAD_RATIO)
     canvas = (height + 2 * pad_y, width + 2 * pad_x)
 
+    # поза покоя — точка отсчёта: щели в ней означают не швы, а криво
+    # севший скелет (капсула торчит туда, где арта нет)
+    rest = {name: 0.0 for name in SWING}
+    _, rest_acc = render_frame(rig, images, rest, canvas, (pad_x, pad_y))
+    rest_gaps, rest_body = _gaps(rig, solve_fk(rig, rest), rest_acc, (pad_x, pad_y))
+    fit_ratio = rest_gaps / max(rest_body, 1)
+
     rendered: list[tuple[np.ndarray, np.ndarray]] = []
     gap_px, worst_ratio, worst_frame = 0, 0.0, 0
     for i in range(frames):
@@ -219,20 +226,29 @@ def swing(
         tiles.append(tile)
     char.write_rgba(char.preview_strip, np.hstack(tiles))
 
+    scale = GAP_SCALE * GAP_SCALE
     return {
         "frames": frames,
-        "gap_px": int(gap_px / (GAP_SCALE * GAP_SCALE)),
-        "gap_ratio": round(worst_ratio, 5),
+        "fit_gap_px": int(rest_gaps / scale),
+        "fit_gap_ratio": round(fit_ratio, 5),
+        "seam_gap_px": int(max(gap_px - rest_gaps, 0) / scale),
+        "seam_gap_ratio": round(max(worst_ratio - fit_ratio, 0.0), 5),
         "worst_frame": worst_frame,
     }
 
 
 def triage(checks: dict) -> str:
-    """Светофор автотриажа (принцип №3 в DESIGN.md)."""
-    gap = checks.get("gap_ratio", 0.0)
+    """Светофор автотриажа (принцип №3 в DESIGN.md).
+
+    Разные дефекты — разные пороги: щели в покое означают криво севший
+    скелет и лечатся правкой суставов, прирост щелей в движении — швы, и
+    лечится нахлёстом.
+    """
+    seam = checks.get("seam_gap_ratio", 0.0)
+    fit = checks.get("fit_gap_ratio", 0.0)
     uncovered = checks.get("uncovered_ratio", 0.0)
-    if gap < 0.002 and uncovered < 0.0005:
+    if seam < 0.002 and fit < 0.005 and uncovered < 0.0005:
         return "green"
-    if gap < 0.01 and uncovered < 0.005:
+    if seam < 0.01 and fit < 0.02 and uncovered < 0.005:
         return "yellow"
     return "red"
