@@ -614,6 +614,11 @@ def run(
     # у посаженных цепочек она уже померена по самому отростку
     radii = measure_radii(template, joints, alpha)
     radii.update(chain_radii)
+    # толщину тоже можно поправить руками: замер по силуэту врёт там, где
+    # части соприкасаются, и человек видит это быстрее любой эвристики
+    for name, factor in (overrides or {}).get("radius_scale", {}).items():
+        if name in radii:
+            radii[name] = (radii[name][0] * factor, radii[name][1] * factor)
     # итоговое совпадение с силуэтом считаем всегда: это и есть оценка
     # качества посадки, по которой персонажа красит триаж
     fit_iou, fit_inside = _agreement(template, joints, alpha, radii)
