@@ -135,8 +135,17 @@ def cmd_process(args: argparse.Namespace) -> int:
     return 0
 
 
+def _require(char: Character, path: Path, hint: str) -> bool:
+    if path.exists():
+        return True
+    say(f"нет {path} — сначала {hint}")
+    return False
+
+
 def cmd_recut(args: argparse.Namespace) -> int:
     char = Character.open(args.name, args.dir)
+    if not _require(char, char.skeleton, f"`char2rig process <png> --name {args.name}`"):
+        return 1
     saved = char.read_json(char.skeleton)
     say(f"пересборка {args.name} с этапа {args.stage}")
     run_pipeline(char, saved["template"], use_ml=not args.no_ml, start=args.stage)
@@ -145,6 +154,8 @@ def cmd_recut(args: argparse.Namespace) -> int:
 
 def cmd_swing(args: argparse.Namespace) -> int:
     char = Character.open(args.name, args.dir)
+    if not _require(char, char.rig, f"`char2rig process <png> --name {args.name}`"):
+        return 1
     rig_data = char.read_json(char.rig)
     images = rig.load_images(char, rig_data)
     checks = render.swing(char, rig_data, images, frames=args.frames)
@@ -168,40 +179,56 @@ def cmd_edit(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="char2rig", description="картинка персонажа → риг → анимация"
-    )
-    parser.add_argument(
+    # общие флаги дублируются в каждую подкоманду: argparse иначе принимает
+    # их только до её имени, а писать `char2rig --no-ml demo` неудобно
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
         "--dir", default=str(CHARACTERS_DIR), help="папка с персонажами"
     )
-    parser.add_argument(
+    common.add_argument(
         "--no-ml", action="store_true", help="не трогать нейросети даже если стоят"
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="char2rig",
+        parents=[common],
+        description="картинка персонажа → риг → анимация",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    demo = sub.add_parser("demo", help="нарисовать демо-кота и прогнать конвейер")
+    demo = sub.add_parser(
+        "demo", parents=[common], help="нарисовать демо-кота и прогнать конвейер"
+    )
     demo.add_argument("--name", default="demo_cat")
     demo.add_argument("--size", default="512x768")
     demo.add_argument("--template", default=templates.DEFAULT_TEMPLATE)
     demo.set_defaults(func=cmd_demo)
 
-    process = sub.add_parser("process", help="прогнать конвейер на PNG")
+    process = sub.add_parser(
+        "process", parents=[common], help="прогнать конвейер на PNG"
+    )
     process.add_argument("image")
     process.add_argument("--name")
     process.add_argument("--template", default=templates.DEFAULT_TEMPLATE)
     process.set_defaults(func=cmd_process)
 
-    recut = sub.add_parser("recut", help="пересчитать с указанного этапа")
+    recut = sub.add_parser(
+        "recut", parents=[common], help="пересчитать с указанного этапа"
+    )
     recut.add_argument("name")
     recut.add_argument("--stage", default="segment", choices=STAGES)
     recut.set_defaults(func=cmd_recut)
 
-    swing = sub.add_parser("swing", help="пересобрать превью из готового рига")
+    swing = sub.add_parser(
+        "swing", parents=[common], help="пересобрать превью из готового рига"
+    )
     swing.add_argument("name")
     swing.add_argument("--frames", type=int, default=render.FRAMES)
     swing.set_defaults(func=cmd_swing)
 
-    edit = sub.add_parser("edit", help="правка суставов (пока вручную)")
+    edit = sub.add_parser(
+        "edit", parents=[common], help="правка суставов (пока вручную)"
+    )
     edit.add_argument("name")
     edit.set_defaults(func=cmd_edit)
     return parser
