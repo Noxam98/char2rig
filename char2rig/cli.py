@@ -43,10 +43,17 @@ def run_pipeline(
     height, width = rgba.shape[:2]
 
     if _from(start, "background"):
-        alpha, method, fallback = background.run(rgba, use_ml)
+        strokes = (
+            char.read_mask(char.silhouette_overrides)
+            if char.silhouette_overrides.exists()
+            else None
+        )
+        alpha, method, fallback = background.run(rgba, use_ml, strokes)
         char.write_mask(char.silhouette, alpha)
-        char.record_stage("background", method, fallback)
-        say(f"  фон:      {method}{' (фоллбек)' if fallback else ''}")
+        painted = int((strokes > 64).sum()) if strokes is not None else 0
+        char.record_stage("background", method, fallback, painted_px=painted)
+        hand = f", правок кистью {painted} px" if painted else ""
+        say(f"  фон:      {method}{' (фоллбек)' if fallback else ''}{hand}")
     else:
         alpha = char.read_mask(char.silhouette)
 

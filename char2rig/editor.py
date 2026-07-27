@@ -24,6 +24,7 @@ from .character import Character
 ALLOWED_FILES = {
     "source.png",
     "silhouette.png",
+    "silhouette.overrides.png",
     "skeleton.json",
     "skeleton.overrides.json",
     "preview.gif",
@@ -58,10 +59,11 @@ PAGE = """<!doctype html>
 </style>
 <header>
   <strong>{name}</strong>
-  <button id="save">Сохранить</button>
-  <button id="rebuild">Сохранить и пересчитать</button>
-  <button id="reset" class="ghost">Сбросить</button>
-  <span id="note">тяни суставы; колесо над костью — толщина</span>
+  <button id="tab-silhouette" class="ghost">1 · Силуэт</button>
+  <button id="tab-skeleton">2 · Скелет</button>
+  <button id="rebuild">Пересчитать</button>
+  <button id="reset" class="ghost">Сбросить этап</button>
+  <span id="note">этапы правятся сверху вниз: сначала силуэт, потом скелет</span>
 </header>
 <div id="stage"><canvas id="c"></canvas><img id="shot" hidden></div>
 <div id="hint"></div>
@@ -70,6 +72,20 @@ const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 const shot = document.getElementById('shot'), note = document.getElementById('note');
 let joints = {{}}, base = {{}}, bones = [], radii = {{}}, baseRadii = {{}};
 let image = new Image(), scale = 1, drag = null, hover = null;
+let mode = 'skeleton', brush = 22, painting = 0;
+let strokes = null, strokeCtx = null, silhouette = new Image();
+
+function setMode(next) {{
+  mode = next;
+  document.getElementById('tab-silhouette').className =
+    next === 'silhouette' ? '' : 'ghost';
+  document.getElementById('tab-skeleton').className =
+    next === 'skeleton' ? '' : 'ghost';
+  note.textContent = next === 'silhouette'
+    ? 'левой — дорисовать тело, правой — стереть; колесо меняет кисть'
+    : 'тяни суставы; колесо над костью — толщина';
+  draw();
+}}
 
 async function boot() {{
   const skeleton = await (await fetch('skeleton.json')).json();
@@ -86,13 +102,26 @@ async function boot() {{
     for (const [name, k] of Object.entries(saved.radius_scale || {{}}))
       radii[name] = k;
   }} catch (e) {{ /* правок ещё нет */ }}
+
   image.onload = () => {{
     scale = Math.min(1, (window.innerHeight - 190) / image.height);
     canvas.width = image.width * scale;
     canvas.height = image.height * scale;
+    if (!strokes) {{
+      strokes = document.createElement('canvas');
+      strokes.width = image.width;
+      strokes.height = image.height;
+      strokeCtx = strokes.getContext('2d', {{ willReadFrequently: true }});
+      const old = new Image();
+      old.onload = () => {{ strokeCtx.drawImage(old, 0, 0); draw(); }};
+      old.onerror = () => draw();
+      old.src = 'silhouette.overrides.png?' + Date.now();
+    }}
     draw();
   }};
   image.src = 'source.png?' + Date.now();
+  silhouette.onload = draw;
+  silhouette.src = 'silhouette.png?' + Date.now();
 }}
 
 function boneRadius(bone, end) {{
@@ -103,6 +132,20 @@ function boneRadius(bone, end) {{
 function draw() {{
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  if (mode === 'silhouette') {{
+    // что конвейер считает телом — поверх арта, чтобы промахи было видно
+    ctx.globalAlpha = 0.45;
+    if (silhouette.complete && silhouette.naturalWidth)
+      ctx.drawImage(silhouette, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 0.7;
+    if (strokes) ctx.drawImage(strokes, 0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = 1;
+    document.getElementById('hint').textContent =
+      'полупрозрачным показан текущий силуэт; кисть ' + Math.round(brush) + ' px';
+    return;
+  }}
+
   for (const b of bones) {{
     const a = joints[b.a], z = joints[b.b];
     if (!a || !z) continue;
@@ -168,26 +211,61 @@ function nearestBone(p) {{
   return bestDistance < 60 ? best : null;
 }}
 
-canvas.onmousedown = e => {{ drag = nearestJoint(at(e)); }};
+function paintAt(p) {{
+  // 255 — «это тело», 128 — «это фон»; так правка остаётся отдельным слоем
+  strokeCtx.globalCompositeOperation = 'source-over';
+  strokeCtx.fillStyle = painting === 1 ? 'rgb(255,255,255)' : 'rgb(128,128,128)';
+  strokeCtx.beginPath();
+  strokeCtx.arc(p.x, p.y, brush / 2, 0, 7);
+  strokeCtx.fill();
+}}
+
+canvas.oncontextmenu = e => e.preventDefault();
+canvas.onmousedown = e => {{
+  const p = at(e);
+  if (mode === 'silhouette') {{
+    painting = e.button === 2 ? 2 : 1;
+    paintAt(p);
+    draw();
+  }} else {{
+    drag = nearestJoint(p);
+  }}
+}};
 canvas.onmousemove = e => {{
   const p = at(e);
+  if (mode === 'silhouette') {{
+    if (painting) {{ paintAt(p); draw(); }}
+    return;
+  }}
   if (drag) {{ joints[drag] = [p.x, p.y]; }}
   else {{ hover = nearestBone(p); }}
   draw();
 }};
-window.onmouseup = () => {{ drag = null; }};
+window.onmouseup = () => {{ drag = null; painting = 0; }};
 canvas.onwheel = e => {{
+  e.preventDefault();
+  if (mode === 'silhouette') {{
+    brush = Math.max(4, Math.min(200, brush * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    draw();
+    return;
+  }}
   const name = hover || nearestBone(at(e));
   if (!name) return;
-  e.preventDefault();
   radii[name] = Math.max(0.3, Math.min(3,
     (radii[name] || 1) * (e.deltaY < 0 ? 1.06 : 1 / 1.06)));
   draw();
 }};
 
+document.getElementById('tab-silhouette').onclick = () => setMode('silhouette');
+document.getElementById('tab-skeleton').onclick = () => setMode('skeleton');
+
 document.getElementById('reset').onclick = () => {{
-  joints = JSON.parse(JSON.stringify(base));
-  for (const b of bones) radii[b.name] = 1;
+  if (mode === 'silhouette') {{
+    strokeCtx.clearRect(0, 0, strokes.width, strokes.height);
+  }} else {{
+    joints = JSON.parse(JSON.stringify(base));
+    for (const b of bones) radii[b.name] = 1;
+  }}
   draw();
 }};
 
@@ -200,7 +278,13 @@ function payload() {{
   }}
   for (const [name, k] of Object.entries(radii))
     if (k !== 1) scales[name] = Math.round(k * 1000) / 1000;
-  return {{ joints: deltas, radius_scale: scales }};
+  return {{
+    joints: deltas,
+    radius_scale: scales,
+    strokes: strokes ? strokes.toDataURL('image/png') : null,
+    // правка силуэта тянет за собой весь конвейер, правка скелета — часть
+    start: mode === 'silhouette' ? 'background' : 'pose',
+  }};
 }}
 
 async function post(path) {{
@@ -211,13 +295,6 @@ async function post(path) {{
   }});
   return response;
 }}
-
-document.getElementById('save').onclick = async () => {{
-  const response = await post('save');
-  note.textContent = response.ok
-    ? 'сохранено — дальше: python -m char2rig recut {name} --stage pose'
-    : 'не сохранилось: ' + response.status;
-}};
 
 document.getElementById('rebuild').onclick = async e => {{
   e.target.disabled = true;
@@ -238,6 +315,29 @@ document.getElementById('rebuild').onclick = async e => {{
 boot();
 </script>
 """
+
+
+def _save_strokes(character: Character, data_url: str | None) -> int:
+    """Сохранить мазки кистью по силуэту. Вернуть число закрашенных пикселей."""
+    if not data_url or "," not in data_url:
+        return 0
+    import base64
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    raw = base64.b64decode(data_url.split(",", 1)[1])
+    # холст приходит RGBA: белое — «это тело», серое — «это фон», прозрачное —
+    # не трогать. Сводим к одному каналу, чтобы этап фона читал его маской
+    painted = np.array(Image.open(io.BytesIO(raw)).convert("RGBA"))
+    grey = painted[..., 0].astype(np.uint8)
+    grey[painted[..., 3] < 128] = 0
+    if not (grey > 64).any():
+        character.silhouette_overrides.unlink(missing_ok=True)
+        return 0
+    character.write_mask(character.silhouette_overrides, grey)
+    return int((grey > 64).sum())
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -297,9 +397,11 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(400, body, "text/plain; charset=utf-8")
 
         self.character.write_json(self.character.skeleton_overrides, overrides)
+        painted = _save_strokes(self.character, payload.get("strokes"))
         print(
             f"  сохранено: суставов {len(overrides['joints'])}, "
-            f"толщин {len(overrides['radius_scale'])}",
+            f"толщин {len(overrides['radius_scale'])}"
+            + (f", мазков {painted} px" if painted else ""),
             flush=True,
         )
         if action == "save":
@@ -307,12 +409,15 @@ class _Handler(BaseHTTPRequestHandler):
 
         # пересчёт прямо из редактора: без него правка вслепую — сохранил,
         # ушёл в консоль, вернулся, и так по кругу
-        from .cli import run_pipeline
+        from .cli import STAGES, run_pipeline
 
+        start = str(payload.get("start", "pose"))
+        if start not in STAGES:
+            start = "pose"
         skeleton = self.character.read_json(self.character.skeleton)
         try:
             checks = run_pipeline(
-                self.character, skeleton["template"], start="pose"
+                self.character, skeleton["template"], start=start
             )
         except Exception as exc:  # noqa: BLE001 — пользователю нужен текст, не трейс
             body = f"пересчёт упал: {type(exc).__name__}: {exc}".encode("utf-8")

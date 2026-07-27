@@ -74,7 +74,25 @@ def _flood_from_border(rgba: np.ndarray) -> np.ndarray:
     return ((~background) * 255).astype(np.uint8)
 
 
-def run(rgba: np.ndarray, use_ml: bool = True) -> tuple[np.ndarray, str, bool]:
+def _apply_strokes(alpha: np.ndarray, strokes: np.ndarray | None) -> np.ndarray:
+    """Наложить ручные мазки: 255 — это тело, 128 — это фон.
+
+    Правка живёт отдельным слоем и переприменяется поверх нового результата:
+    перегенерация силуэта её не стирает (принцип №1 в DESIGN.md).
+    """
+    if strokes is None:
+        return alpha
+    result = alpha.copy()
+    result[strokes > 200] = 255
+    result[(strokes > 64) & (strokes <= 200)] = 0
+    return result
+
+
+def run(
+    rgba: np.ndarray,
+    use_ml: bool = True,
+    strokes: np.ndarray | None = None,
+) -> tuple[np.ndarray, str, bool]:
     """Вернуть (альфа uint8, название метода, был ли это фоллбек).
 
     Чистка бинарная, но сглаженный край исходной альфы сохраняется: по нему
@@ -82,11 +100,16 @@ def run(rgba: np.ndarray, use_ml: bool = True) -> tuple[np.ndarray, str, bool]:
     """
     if _has_alpha(rgba):
         soft = rgba[..., 3]
-        return np.minimum(_clean(soft), soft), "source_alpha", True
+        return _apply_strokes(np.minimum(_clean(soft), soft), strokes), (
+            "source_alpha"
+        ), True
 
     if use_ml:
         soft = _try_rembg(rgba)
         if soft is not None:
-            return np.minimum(_clean(soft), soft), "rembg", False
+            return _apply_strokes(np.minimum(_clean(soft), soft), strokes), (
+                "rembg"
+            ), False
 
-    return _clean(_flood_from_border(rgba)), "border_flood", True
+    flooded = _clean(_flood_from_border(rgba))
+    return _apply_strokes(flooded, strokes), "border_flood", True

@@ -5,12 +5,13 @@
     "background": {
       "method": "rembg",
       "fallback": false,
-      "at": "2026-07-27T21:59:20+03:00"
+      "at": "2026-07-27T22:15:16+03:00",
+      "painted_px": 0
     },
     "pose": {
       "method": "bbox_fit+dwpose_snap",
       "fallback": false,
-      "at": "2026-07-27T22:06:55+03:00",
+      "at": "2026-07-27T22:15:23+03:00",
       "bbox": [
         102,
         76,
@@ -36,7 +37,7 @@
     "segment": {
       "method": "capsules",
       "fallback": true,
-      "at": "2026-07-27T22:07:02+03:00",
+      "at": "2026-07-27T22:15:30+03:00",
       "parts": 17,
       "sam_parts": [],
       "empty_parts": [],
@@ -45,7 +46,7 @@
     "layers": {
       "method": "overlap_cut+lama",
       "fallback": false,
-      "at": "2026-07-27T22:07:09+03:00",
+      "at": "2026-07-27T22:15:37+03:00",
       "layers": 17,
       "uncovered_px": 0,
       "uncovered_ratio": 0.0,
@@ -55,7 +56,7 @@
     "rig": {
       "method": "joint_pivots",
       "fallback": false,
-      "at": "2026-07-27T22:07:09+03:00",
+      "at": "2026-07-27T22:15:37+03:00",
       "bones": 17
     }
   },
@@ -68,6 +69,6 @@
     "fit_inside": 0.87,
     "fit_iou": 0.702
   },
-  "updated": "2026-07-27T22:07:13+03:00",
+  "updated": "2026-07-27T22:15:40+03:00",
   "triage": "red"
 }

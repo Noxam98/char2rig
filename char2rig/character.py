@@ -56,6 +56,11 @@ class Character:
         return self.root / "silhouette.png"
 
     @property
+    def silhouette_overrides(self) -> Path:
+        """Мазки кистью по силуэту: 255 — добавить, 128 — убрать, 0 — не трогать."""
+        return self.root / "silhouette.overrides.png"
+
+    @property
     def skeleton(self) -> Path:
         return self.root / "skeleton.json"
 
