@@ -27,3 +27,6 @@ char2rig = "char2rig.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["char2rig*"]
+
+[tool.setuptools.package-data]
+char2rig = ["editor.html"]

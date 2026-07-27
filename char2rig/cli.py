@@ -31,6 +31,54 @@ def _texture(rgba: np.ndarray, alpha: np.ndarray) -> np.ndarray:
     return texture
 
 
+def _auto_skeleton(
+    joints: dict[str, tuple[float, float]],
+    radii: dict[str, tuple[float, float]],
+    overrides: dict | None,
+) -> tuple[dict, dict]:
+    """Скелет без ручных дельт — база, от которой редактор их отсчитывает.
+
+    В `skeleton.json` едет посаженный скелет уже с правками, и если бы
+    редактор брал базу оттуда, он прибавил бы дельты второй раз. Правки
+    прибавляются и умножаются, так что автоматику из результата видно точно.
+    """
+    deltas = (overrides or {}).get("joints", {})
+    scales = (overrides or {}).get("radius_scale", {})
+    auto_joints = {
+        name: (
+            (value[0] - deltas[name][0], value[1] - deltas[name][1])
+            if name in deltas
+            else value
+        )
+        for name, value in joints.items()
+    }
+    auto_radii = {
+        name: (
+            (value[0] / scales[name], value[1] / scales[name])
+            if scales.get(name)
+            else value
+        )
+        for name, value in radii.items()
+    }
+    return auto_joints, auto_radii
+
+
+def load_parts_overrides(char: Character, template: templates.Template):
+    """Ручная карта частей с диска: (карта в номерах костей, устарела ли).
+
+    Устарела — значит правку рисовали по другому арту: пиксельные координаты
+    к новой картинке отношения не имеют, применять их молча нельзя
+    (принцип №1 в DESIGN.md).
+    """
+    if not (char.parts_overrides.exists() and char.parts_legend.exists()):
+        return None, False
+    legend = char.read_json(char.parts_legend)
+    if legend.get("source") not in ("", char.source_digest()):
+        return None, True
+    painted = char.read_mask(char.parts_overrides)
+    return segment.remap_overrides(painted, legend.get("parts", []), template), False
+
+
 def run_pipeline(
     char: Character,
     template_name: str,
@@ -83,18 +131,23 @@ def run_pipeline(
         joints, radii, method, fallback, params = pose.run(
             template, rgba, alpha, use_ml, overrides
         )
+        auto_joints, auto_radii = _auto_skeleton(joints, radii, overrides)
+
+        def pairs(values: dict) -> dict:
+            return {k: [round(v[0], 2), round(v[1], 2)] for k, v in values.items()}
+
         char.write_json(
             char.skeleton,
             {
                 "template": template.name,
                 "size": [width, height],
                 "fit": params,
-                "joints": {
-                    k: [round(v[0], 2), round(v[1], 2)] for k, v in joints.items()
-                },
-                "radii": {
-                    k: [round(v[0], 2), round(v[1], 2)] for k, v in radii.items()
-                },
+                "joints": pairs(joints),
+                "radii": pairs(radii),
+                # то же самое без ручных правок — редактору не из чего иначе
+                # отсчитывать дельты
+                "joints_auto": pairs(auto_joints),
+                "radii_auto": pairs(auto_radii),
             },
         )
         char.record_stage("pose", method, fallback, **params)
@@ -107,13 +160,17 @@ def run_pipeline(
     unit = segment.pixels_per_unit(joints, template)
 
     if _from(start, "segment"):
+        hand, stale_parts = load_parts_overrides(char, template)
+        if stale_parts:
+            say("  ! карта частей правилась под другой арт — правка не применена")
         masks, method, fallback, stats = segment.run(
-            template, rgba, alpha, joints, radii, use_ml
+            template, rgba, alpha, joints, radii, use_ml, hand
         )
         for name, mask in masks.items():
             char.write_mask(char.masks_dir / f"{name}.png", mask)
-        char.record_stage("segment", method, fallback, **stats)
-        say(f"  части:    {method} — {stats['parts']} шт")
+        char.record_stage("segment", method, fallback, parts_stale=stale_parts, **stats)
+        by_hand = f", правок {stats['hand_px']} px" if stats["hand_px"] else ""
+        say(f"  части:    {method} — {stats['parts']} шт{by_hand}")
     else:
         masks = {
             path.stem: char.read_mask(path)

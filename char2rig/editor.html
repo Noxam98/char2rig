@@ -1,0 +1,698 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>char2rig — __CHARACTER__</title>
+<style>
+ body { margin:0; background:#1d1f23; color:#d8dbe0;
+        font:14px/1.5 system-ui, sans-serif; }
+ header { display:flex; gap:8px; align-items:center; padding:10px 16px;
+          background:#25282e; border-bottom:1px solid #33373f; flex-wrap:wrap;
+          position:sticky; top:0; z-index:2; }
+ button { background:#3a6ea5; color:#fff; border:0; border-radius:4px;
+          padding:6px 12px; font:inherit; cursor:pointer; }
+ button.ghost { background:#33373f; }
+ button:disabled { opacity:.45; cursor:default; }
+ .sep { width:1px; height:22px; background:#3d424b; margin:0 4px; }
+ #note { margin-left:auto; color:#9aa1ad; }
+ #stage { display:flex; gap:16px; justify-content:center; padding:16px; }
+ canvas { cursor:crosshair; background:#111318; }
+ #shot { max-height:78vh; border-radius:4px; background:#111318; }
+ #hint { padding:0 16px 16px; color:#9aa1ad; }
+ b.k { color:#e8b33a; }
+ #palette { width:172px; max-height:78vh; overflow:auto; }
+ #palette.off { display:none; }
+ #palette div { display:flex; align-items:center; gap:8px; padding:3px 6px;
+                border-radius:4px; cursor:pointer; font-size:13px; }
+ #palette div:hover { background:#2b2f36; }
+ #palette div.on { background:#3a6ea5; color:#fff; }
+ #palette i { width:14px; height:14px; border-radius:3px; flex:none;
+              box-shadow:0 0 0 1px rgba(0,0,0,.5) inset; }
+</style>
+<header>
+  <strong>__CHARACTER__</strong>
+  <button id="tab-contour" class="ghost">1 · Контур</button>
+  <button id="tab-silhouette" class="ghost">1б · Кисть</button>
+  <button id="tab-skeleton" class="ghost">2 · Скелет</button>
+  <button id="tab-parts" class="ghost">3 · Части</button>
+  <span class="sep"></span>
+  <button id="save">Сохранить</button>
+  <button id="rebuild">Сохранить и пересчитать</button>
+  <button id="reset" class="ghost">Сбросить этап</button>
+  <button id="fit" class="ghost">Вписать</button>
+  <button id="preview-mode" class="ghost">превью: сетка</button>
+  <span id="note">этапы правятся сверху вниз: сначала силуэт, потом скелет</span>
+</header>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="palette" class="off"></div>
+  <img id="shot" hidden>
+</div>
+<div id="hint"></div>
+<script>
+const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+const shot = document.getElementById('shot'), note = document.getElementById('note');
+const hint = document.getElementById('hint');
+let joints = {}, base = {}, bones = [], radii = {}, baseRadii = {};
+let image = new Image(), scale = 1, drag = null, hover = null;
+// вид: масштаб и сдвиг. Ctrl+колесо — зум под курсором, средняя кнопка — тащить
+let baseScale = 1, zoom = 1, panX = 0, panY = 0, panning = null;
+let mode = 'parts', brush = 22, painting = 0;
+let strokes = null, strokeCtx = null, silhouette = new Image();
+let contour = [], contourNode = null, contourHover = -1;
+let previewMode = 'mesh';
+// части: карта «пиксель → кость» от конвейера (owner) и ручные правки (paint),
+// поверх неё. Обе — байт на пиксель, значение = номер кости + 1, 0 — пусто
+let parts = [], owner = null, paint = null, partWidth = 0, partHeight = 0;
+let partsCanvas = null, partsCtx = null, partsData = null;
+let selected = 0, hoverPart = -1, paintedParts = 0;
+let cursor = null;
+// что человек трогал: правки копятся между вкладками и уходят вместе,
+// иначе уйдёшь с вкладки не сохранившись — и работа пропала
+let contourEdited = false, painted = false, boneEdited = false;
+let partsEdited = false;
+
+const ZOOM = ' · колесо — зум, средняя кнопка — тащить, 0 — вписать';
+const NOTES = {
+  contour: 'узлы тянутся; двойной клик по линии — добавить, правый клик — удалить'
+           + ZOOM,
+  silhouette: 'левой — дорисовать тело, правой — стереть; колесо — кисть,'
+              + ' Ctrl+колесо — зум',
+  skeleton: 'тяни суставы; колесо над костью — толщина, Ctrl+колесо — зум',
+  parts: 'левой — отдать пиксели выбранной части, правой — вернуть автоматике,'
+         + ' Alt+клик — взять часть под курсором',
+};
+
+function setMode(next) {
+  mode = next;
+  for (const tab of ['contour', 'silhouette', 'skeleton', 'parts'])
+    document.getElementById('tab-' + tab).className = tab === next ? '' : 'ghost';
+  document.getElementById('palette').className = next === 'parts' ? '' : 'off';
+  note.textContent = NOTES[next];
+  draw();
+}
+
+async function boot() {
+  const skeleton = await (await fetch('skeleton.json?' + Date.now())).json();
+  bones = await (await fetch('bones.json')).json();
+  // база — автоматический скелет без ручных дельт: правки лежат оверлеем и
+  // прибавляются к нему здесь. Взять `joints` (там дельты уже применены)
+  // значило бы применить их второй раз
+  base = skeleton.joints_auto || skeleton.joints;
+  baseRadii = skeleton.radii_auto || skeleton.radii || {};
+  joints = JSON.parse(JSON.stringify(base));
+  radii = {};
+  for (const b of bones) radii[b.name] = 1;
+  try {
+    const saved = await (await fetch('skeleton.overrides.json?' + Date.now())).json();
+    for (const [name, d] of Object.entries(saved.joints || {}))
+      if (joints[name]) { joints[name][0] += d[0]; joints[name][1] += d[1]; }
+    for (const [name, k] of Object.entries(saved.radius_scale || {}))
+      radii[name] = k;
+  } catch (e) { /* правок ещё нет */ }
+  boneEdited = false;
+
+  image.onload = () => {
+    canvas.height = Math.max(320, window.innerHeight - 190);
+    canvas.width = Math.max(
+      320, Math.min(image.width * canvas.height / image.height, window.innerWidth - 420));
+    fitView();
+    if (!strokes) {
+      strokes = document.createElement('canvas');
+      strokes.width = image.width;
+      strokes.height = image.height;
+      strokeCtx = strokes.getContext('2d', { willReadFrequently: true });
+      const old = new Image();
+      old.onload = () => { strokeCtx.drawImage(old, 0, 0); draw(); };
+      old.onerror = () => draw();
+      old.src = 'silhouette.overrides.png?' + Date.now();
+    }
+    draw();
+  };
+  image.src = 'source.png?' + Date.now();
+  silhouette.onload = draw;
+  silhouette.src = 'silhouette.png?' + Date.now();
+
+  const fetched = await (await fetch('contour.json?' + Date.now())).json();
+  contour = fetched.points || [];
+  // то, что пришло с сервера, уже сохранено — считать это правкой не надо
+  contourEdited = false;
+  painted = false;
+  await loadParts();
+  draw();
+}
+
+function fitView() {
+  baseScale = Math.min(canvas.width / image.width, canvas.height / image.height);
+  zoom = 1;
+  scale = baseScale;
+  panX = (canvas.width - image.width * scale) / 2;
+  panY = (canvas.height - image.height * scale) / 2;
+  draw();
+}
+
+// --- части ---------------------------------------------------------------
+
+async function loadParts() {
+  const meta = await (await fetch('parts.json?' + Date.now())).json();
+  parts = meta.parts || [];
+  [partWidth, partHeight] = meta.size;
+  const stamp = Date.now();
+  owner = new Uint8Array(
+    await (await fetch('parts.bin?' + stamp)).arrayBuffer());
+  paint = new Uint8Array(
+    await (await fetch('parts.overrides.bin?' + stamp)).arrayBuffer());
+  if (!partWidth || !partHeight || owner.length !== partWidth * partHeight) {
+    parts = [];  // масок ещё нет — вкладка покажет, что править нечего
+    partsCanvas = partsData = null;
+    return;
+  }
+  partsCanvas = document.createElement('canvas');
+  partsCanvas.width = partWidth;
+  partsCanvas.height = partHeight;
+  partsCtx = partsCanvas.getContext('2d');
+  partsData = partsCtx.createImageData(partWidth, partHeight);
+  paintedParts = 0;
+  for (let i = 0; i < paint.length; i++) if (paint[i]) paintedParts++;
+  partsEdited = false;
+  repaintParts();
+  buildPalette();
+}
+
+function partColor(index, into, offset) {
+  // выбранная часть светится ярче остальных: иначе на семнадцати цветах не
+  // видно, куда именно кисть переносит пиксели
+  const color = parts[index - 1].color;
+  into[offset] = color[0];
+  into[offset + 1] = color[1];
+  into[offset + 2] = color[2];
+  into[offset + 3] = index - 1 === selected ? 215 : 105;
+}
+
+function repaintParts() {
+  if (!partsData) return;
+  const data = partsData.data;
+  for (let i = 0; i < owner.length; i++) {
+    const index = paint[i] || owner[i];
+    if (index) partColor(index, data, i * 4);
+    else data[i * 4 + 3] = 0;
+  }
+  partsCtx.putImageData(partsData, 0, 0);
+}
+
+function stampParts(p, value) {
+  if (!partsData) return;
+  const r = brush / 2;
+  const x0 = Math.max(0, Math.floor(p.x - r));
+  const x1 = Math.min(partWidth - 1, Math.ceil(p.x + r));
+  const y0 = Math.max(0, Math.floor(p.y - r));
+  const y1 = Math.min(partHeight - 1, Math.ceil(p.y + r));
+  if (x1 < x0 || y1 < y0) return;
+  const data = partsData.data;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if ((x - p.x) ** 2 + (y - p.y) ** 2 > r * r) continue;
+      const i = y * partWidth + x;
+      if (!owner[i]) continue;  // за силуэтом частей нет
+      // совпало с автоматикой — правку не храним: оверлей должен помнить
+      // только расхождения, иначе он подменит собой весь конвейер
+      const next = value && value !== owner[i] ? value : 0;
+      if (next !== paint[i]) paintedParts += (next ? 1 : 0) - (paint[i] ? 1 : 0);
+      paint[i] = next;
+      partColor(paint[i] || owner[i], data, i * 4);
+    }
+  }
+  partsCtx.putImageData(partsData, 0, 0, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+  partsEdited = true;
+}
+
+function partAt(p) {
+  if (!owner) return -1;
+  const x = Math.floor(p.x), y = Math.floor(p.y);
+  if (x < 0 || y < 0 || x >= partWidth || y >= partHeight) return -1;
+  const i = y * partWidth + x;
+  const index = paint[i] || owner[i];
+  return index ? index - 1 : -1;
+}
+
+function buildPalette() {
+  const box = document.getElementById('palette');
+  box.innerHTML = '';
+  parts.forEach((part, i) => {
+    const row = document.createElement('div');
+    row.className = i === selected ? 'on' : '';
+    const swatch = document.createElement('i');
+    swatch.style.background = 'rgb(' + part.color.join(',') + ')';
+    row.appendChild(swatch);
+    row.appendChild(document.createTextNode(part.name));
+    row.onclick = () => selectPart(i);
+    box.appendChild(row);
+  });
+}
+
+function selectPart(index) {
+  if (index < 0 || index >= parts.length || index === selected) return;
+  selected = index;
+  buildPalette();
+  repaintParts();
+  draw();
+}
+
+// --- отрисовка -----------------------------------------------------------
+
+function boneRadius(bone, end) {
+  const r = baseRadii[bone.name];
+  return (r ? r[end] : 12) * (radii[bone.name] || 1);
+}
+
+function drawBones(thin) {
+  for (const b of bones) {
+    const a = joints[b.a], z = joints[b.b];
+    if (!a || !z) continue;
+    const on = !thin && hover === b.name;
+    ctx.strokeStyle = thin ? 'rgba(20,22,26,.75)'
+      : on ? 'rgba(232,179,58,.95)' : 'rgba(90,170,240,.45)';
+    ctx.lineWidth = thin ? 1.5 : on ? 3 : 2;
+    if (!thin) {
+      // капсула — то, что риг считает телом этой кости
+      ctx.beginPath();
+      ctx.arc(a[0] * scale, a[1] * scale, boneRadius(b, 0) * scale, 0, 7);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(z[0] * scale, z[1] * scale, boneRadius(b, 1) * scale, 0, 7);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(a[0] * scale, a[1] * scale);
+    ctx.lineTo(z[0] * scale, z[1] * scale);
+    ctx.stroke();
+  }
+}
+
+function drawCursor() {
+  if (!cursor) return;
+  ctx.strokeStyle = 'rgba(255,255,255,.85)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cursor.x * scale, cursor.y * scale, brush / 2 * scale, 0, 7);
+  ctx.stroke();
+}
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // сдвиг вида делаем трансформом, а масштаб остаётся в `scale`: так все
+  // размеры узлов и линий остаются постоянными на экране при любом зуме
+  ctx.setTransform(1, 0, 0, 1, panX, panY);
+  ctx.drawImage(image, 0, 0, image.width * scale, image.height * scale);
+
+  if (mode === 'contour') {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(90,210,140,.95)';
+    ctx.beginPath();
+    contour.forEach((p, i) => {
+      const x = p[0] * scale, y = p[1] * scale;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(90,210,140,.12)';
+    ctx.fill();
+    contour.forEach((p, i) => {
+      ctx.fillStyle = i === contourHover ? '#e8b33a' : '#3ad48a';
+      ctx.beginPath();
+      ctx.arc(p[0] * scale, p[1] * scale, i === contourHover ? 6 : 4, 0, 7);
+      ctx.fill();
+    });
+    hint.textContent =
+      'узлов: ' + contour.length + ' · контур заменяет автоматику целиком';
+    return;
+  }
+
+  if (mode === 'silhouette') {
+    // что конвейер считает телом — поверх арта, чтобы промахи было видно
+    ctx.globalAlpha = 0.45;
+    if (silhouette.complete && silhouette.naturalWidth)
+      ctx.drawImage(silhouette, 0, 0, image.width * scale, image.height * scale);
+    ctx.globalAlpha = 0.7;
+    if (strokes)
+      ctx.drawImage(strokes, 0, 0, image.width * scale, image.height * scale);
+    ctx.globalAlpha = 1;
+    hint.textContent =
+      'полупрозрачным показан текущий силуэт; кисть ' + Math.round(brush) + ' px';
+    return;
+  }
+
+  if (mode === 'parts') {
+    if (!partsCanvas) {
+      hint.textContent = 'масок ещё нет — сначала прогони конвейер до этапа частей';
+      return;
+    }
+    // прозрачность запечена в саму карту (выбранная часть ярче), поэтому
+    // рисуем как есть; сглаживание гасим только на зуме, чтобы видеть пиксели
+    ctx.imageSmoothingEnabled = scale < 1;
+    ctx.drawImage(partsCanvas, 0, 0, image.width * scale, image.height * scale);
+    ctx.imageSmoothingEnabled = true;
+    drawBones(true);
+    drawCursor();
+    const under = hoverPart >= 0 ? parts[hoverPart].name : '—';
+    hint.innerHTML =
+      'переносим в <b class="k">' + (parts[selected] || {}).name + '</b>'
+      + ' &nbsp;·&nbsp; под курсором: ' + under
+      + ' &nbsp;·&nbsp; кисть ' + Math.round(brush) + ' px'
+      + ' &nbsp;·&nbsp; правок ' + paintedParts + ' px';
+    return;
+  }
+
+  drawBones(false);
+  for (const [name, p] of Object.entries(joints)) {
+    const shifted = base[name][0] !== p[0] || base[name][1] !== p[1];
+    ctx.fillStyle = shifted ? '#e8b33a' : '#e04a4a';
+    ctx.beginPath();
+    ctx.arc(p[0] * scale, p[1] * scale, 5, 0, 7);
+    ctx.fill();
+  }
+  const movedJoints = movedNames();
+  const thick = Object.entries(radii).filter(([, k]) => k !== 1)
+    .map(([n, k]) => n + ' ×' + k.toFixed(2));
+  hint.innerHTML =
+    (movedJoints.length ? 'суставы: <b class="k">' + movedJoints.join(', ') + '</b>' : 'суставы не тронуты')
+    + ' &nbsp;·&nbsp; ' +
+    (thick.length ? 'толщина: <b class="k">' + thick.join(', ') + '</b>' : 'толщина не тронута');
+}
+
+function movedNames() {
+  return Object.keys(joints).filter(
+    n => base[n] && (base[n][0] !== joints[n][0] || base[n][1] !== joints[n][1]));
+}
+
+// --- ввод ----------------------------------------------------------------
+
+function at(event) {
+  const box = canvas.getBoundingClientRect();
+  return { x: (event.clientX - box.left - panX) / scale,
+           y: (event.clientY - box.top - panY) / scale };
+}
+
+function nearestJoint(p) {
+  let best = null, bestDistance = 14 / scale;
+  for (const [name, q] of Object.entries(joints)) {
+    const d = Math.hypot(q[0] - p.x, q[1] - p.y);
+    if (d < bestDistance) { best = name; bestDistance = d; }
+  }
+  return best;
+}
+
+function nearestBone(p) {
+  let best = null, bestDistance = Infinity;
+  for (const b of bones) {
+    const a = joints[b.a], z = joints[b.b];
+    if (!a || !z) continue;
+    const vx = z[0] - a[0], vy = z[1] - a[1];
+    const len2 = vx * vx + vy * vy || 1;
+    let t = ((p.x - a[0]) * vx + (p.y - a[1]) * vy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(a[0] + vx * t - p.x, a[1] + vy * t - p.y);
+    if (d < bestDistance) { best = b.name; bestDistance = d; }
+  }
+  return bestDistance < 60 ? best : null;
+}
+
+function paintAt(p) {
+  // 255 — «это тело», 128 — «это фон»; так правка остаётся отдельным слоем
+  strokeCtx.globalCompositeOperation = 'source-over';
+  strokeCtx.fillStyle = painting === 1 ? 'rgb(255,255,255)' : 'rgb(128,128,128)';
+  strokeCtx.beginPath();
+  strokeCtx.arc(p.x, p.y, brush / 2, 0, 7);
+  strokeCtx.fill();
+  painted = true;
+}
+
+function nearestNode(p) {
+  let best = -1, bestDistance = 12 / scale;
+  contour.forEach((q, i) => {
+    const d = Math.hypot(q[0] - p.x, q[1] - p.y);
+    if (d < bestDistance) { best = i; bestDistance = d; }
+  });
+  return best;
+}
+
+function nearestEdge(p) {
+  let best = -1, bestDistance = 14 / scale;
+  for (let i = 0; i < contour.length; i++) {
+    const a = contour[i], b = contour[(i + 1) % contour.length];
+    const vx = b[0] - a[0], vy = b[1] - a[1];
+    const len2 = vx * vx + vy * vy || 1;
+    let t = ((p.x - a[0]) * vx + (p.y - a[1]) * vy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(a[0] + vx * t - p.x, a[1] + vy * t - p.y);
+    if (d < bestDistance) { best = i; bestDistance = d; }
+  }
+  return best;
+}
+
+canvas.oncontextmenu = e => e.preventDefault();
+
+canvas.ondblclick = e => {
+  if (mode !== 'contour') return;
+  const p = at(e);
+  const edge = nearestEdge(p);
+  if (edge >= 0) {
+    contour.splice(edge + 1, 0, [p.x, p.y]);
+    contourHover = edge + 1;
+    contourEdited = true;
+    draw();
+  }
+};
+
+canvas.onmousedown = e => {
+  const p = at(e);
+  if (e.button === 1) {  // средняя кнопка — тащить холст
+    e.preventDefault();
+    panning = { x: e.clientX - panX, y: e.clientY - panY };
+    return;
+  }
+  if (mode === 'contour') {
+    const node = nearestNode(p);
+    if (e.button === 2) {
+      if (node >= 0 && contour.length > 3) {
+        contour.splice(node, 1);
+        contourEdited = true;
+        draw();
+      }
+      return;
+    }
+    contourNode = node;
+    return;
+  }
+  if (mode === 'silhouette') {
+    painting = e.button === 2 ? 2 : 1;
+    paintAt(p);
+    draw();
+  } else if (mode === 'parts') {
+    if (e.altKey) {  // пипетка: взять часть, по которой кликнули
+      selectPart(partAt(p));
+      return;
+    }
+    painting = e.button === 2 ? 2 : 1;
+    stampParts(p, painting === 1 ? selected + 1 : 0);
+    draw();
+  } else {
+    drag = nearestJoint(p);
+  }
+};
+canvas.onmousemove = e => {
+  if (panning) {
+    panX = e.clientX - panning.x;
+    panY = e.clientY - panning.y;
+    draw();
+    return;
+  }
+  const p = at(e);
+  if (mode === 'contour') {
+    if (contourNode !== null && contourNode >= 0) {
+      contour[contourNode] = [p.x, p.y];
+      contourEdited = true;
+    } else contourHover = nearestNode(p);
+    draw();
+    return;
+  }
+  if (mode === 'silhouette') {
+    if (painting) { paintAt(p); draw(); }
+    return;
+  }
+  if (mode === 'parts') {
+    cursor = p;
+    if (painting) stampParts(p, painting === 1 ? selected + 1 : 0);
+    else hoverPart = partAt(p);
+    draw();
+    return;
+  }
+  if (drag) { joints[drag] = [p.x, p.y]; boneEdited = true; }
+  else { hover = nearestBone(p); }
+  draw();
+};
+window.onmouseup = () => {
+  drag = null; painting = 0; contourNode = null; panning = null;
+};
+canvas.onmouseleave = () => { cursor = null; draw(); };
+
+canvas.onwheel = e => {
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey || mode === 'contour') {
+    // зум под курсором: точка арта под мышкой остаётся на месте
+    const box = canvas.getBoundingClientRect();
+    const mx = e.clientX - box.left, my = e.clientY - box.top;
+    const before = { x: (mx - panX) / scale, y: (my - panY) / scale };
+    zoom = Math.max(0.2, Math.min(12, zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    scale = baseScale * zoom;
+    panX = mx - before.x * scale;
+    panY = my - before.y * scale;
+    draw();
+    return;
+  }
+  if (mode === 'silhouette' || mode === 'parts') {
+    brush = Math.max(4, Math.min(200, brush * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    draw();
+    return;
+  }
+  const name = hover || nearestBone(at(e));
+  if (!name) return;
+  radii[name] = Math.max(0.3, Math.min(3,
+    (radii[name] || 1) * (e.deltaY < 0 ? 1.06 : 1 / 1.06)));
+  boneEdited = true;
+  draw();
+};
+
+document.getElementById('fit').onclick = () => fitView();
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === '0') fitView();
+  if (mode === 'parts' && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    selectPart(selected + (e.key === 'ArrowDown' ? 1 : -1));
+  }
+});
+document.getElementById('tab-contour').onclick = () => setMode('contour');
+document.getElementById('tab-silhouette').onclick = () => setMode('silhouette');
+document.getElementById('tab-skeleton').onclick = () => setMode('skeleton');
+document.getElementById('tab-parts').onclick = () => setMode('parts');
+
+document.getElementById('preview-mode').onclick = e => {
+  previewMode = previewMode === 'mesh' ? 'parts' : 'mesh';
+  e.target.textContent = 'превью: ' + (previewMode === 'mesh' ? 'сетка' : 'части');
+};
+
+document.getElementById('reset').onclick = async () => {
+  if (mode === 'contour') {
+    const fetched = await (await fetch('contour.json?auto=1&' + Date.now())).json();
+    contour = fetched.points || [];
+    contourEdited = false;
+  } else if (mode === 'silhouette') {
+    strokeCtx.clearRect(0, 0, strokes.width, strokes.height);
+    painted = false;
+  } else if (mode === 'parts') {
+    if (paint) paint.fill(0);
+    paintedParts = 0;
+    partsEdited = true;
+    repaintParts();
+  } else {
+    joints = JSON.parse(JSON.stringify(base));
+    for (const b of bones) radii[b.name] = 1;
+    boneEdited = true;
+  }
+  draw();
+};
+
+function partsDataURL() {
+  // индекс части кладём в красный канал, а «не тронуто» — в прозрачность:
+  // PNG отдаёт непрозрачные пиксели байт в байт, так что карта доедет целой
+  const buffer = document.createElement('canvas');
+  buffer.width = partWidth;
+  buffer.height = partHeight;
+  const bufferCtx = buffer.getContext('2d');
+  const encoded = bufferCtx.createImageData(partWidth, partHeight);
+  const data = encoded.data;
+  for (let i = 0; i < paint.length; i++) {
+    if (!paint[i]) continue;
+    data[i * 4] = paint[i];
+    data[i * 4 + 3] = 255;
+  }
+  bufferCtx.putImageData(encoded, 0, 0);
+  return buffer.toDataURL('image/png');
+}
+
+function payload() {
+  const deltas = {}, scales = {};
+  for (const [name, p] of Object.entries(joints)) {
+    const dx = p[0] - base[name][0], dy = p[1] - base[name][1];
+    if (dx || dy) deltas[name] = [Math.round(dx * 100) / 100,
+                                  Math.round(dy * 100) / 100];
+  }
+  for (const [name, k] of Object.entries(radii))
+    if (k !== 1) scales[name] = Math.round(k * 1000) / 1000;
+  return {
+    joints: deltas,
+    radius_scale: scales,
+    strokes: strokes ? strokes.toDataURL('image/png') : null,
+    // контур уходит, только если его правили: иначе автоматический контур
+    // записался бы как ручной и навсегда подменил бы собой нейросеть
+    contour: contourEdited ? contour.map(p => [
+      Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]) : null,
+    parts: partsEdited && paint ? partsDataURL() : null,
+    // с какого этапа пересчитывать: смотрим на самую раннюю правку, а не на
+    // то, какая вкладка сейчас открыта
+    start: (contourEdited || painted) ? 'background'
+         : boneEdited ? 'pose'
+         : partsEdited ? 'segment' : 'pose',
+    preview: previewMode,
+  };
+}
+
+async function post(path) {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload()),
+  });
+  return response;
+}
+
+function summary() {
+  const items = [];
+  if (contourEdited) items.push('контур (' + contour.length + ' узлов)');
+  if (painted) items.push('мазки');
+  const moved = movedNames().length;
+  if (moved) items.push('суставов ' + moved);
+  const thick = Object.values(radii).filter(k => k !== 1).length;
+  if (thick) items.push('толщин ' + thick);
+  if (partsEdited) items.push('частей ' + paintedParts + ' px');
+  return items.length ? items.join(', ') : 'ничего не менялось';
+}
+
+document.getElementById('save').onclick = async e => {
+  e.target.disabled = true;
+  const response = await post('save');
+  note.textContent = response.ok
+    ? 'сохранено: ' + summary()
+    : 'не сохранилось: ' + response.status;
+  e.target.disabled = false;
+};
+
+document.getElementById('rebuild').onclick = async e => {
+  e.target.disabled = true;
+  note.textContent = 'считаю…';
+  const response = await post('rebuild');
+  const result = response.ok ? await response.json() : null;
+  note.textContent = result
+    ? 'пересчитано: ' + result.triage + ', скелет внутри арта ' + result.fit_inside
+    : 'не сошлось: ' + response.status;
+  if (result) {
+    shot.hidden = false;
+    shot.src = 'preview.gif?' + Date.now();
+    await boot();
+  }
+  e.target.disabled = false;
+};
+
+setMode(mode);
+boot();
+</script>

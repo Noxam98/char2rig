@@ -7,6 +7,9 @@
 
 SAM2 (ultralytics) подключается сверху: маски от него уточняют границы,
 а спорные пиксели всё равно разводятся по капсулам.
+
+Последним слоем ложится ручная карта из редактора (`masks.overrides.png`):
+человек кистью переносит пиксели в нужную часть, и его слово — крайнее.
 """
 
 from __future__ import annotations
@@ -72,6 +75,24 @@ def capsule_owner(
 
 
 
+def remap_overrides(
+    painted: np.ndarray, legend: list[str], template: Template
+) -> np.ndarray:
+    """Ручную карту частей → в номера костей текущего шаблона (0 — не трогать).
+
+    Правка хранится вместе с легендой (номер → имя кости), потому что номер
+    сам по себе ничего не значит: сменится шаблон или порядок костей — и
+    «хвост» молча превратится в «бедро». Кость, которой в шаблоне больше нет,
+    правка теряет.
+    """
+    names = [b.name for b in template.bones]
+    table = np.zeros(256, dtype=np.int16)
+    for index, name in enumerate(legend[:255]):
+        if name in names:
+            table[index + 1] = names.index(name) + 1
+    return table[painted.astype(np.uint8)]
+
+
 _SAM = None
 
 # SAM2 по подсказке из одной кости часто отдаёт весь силуэт целиком: на
@@ -133,8 +154,13 @@ def run(
     joints: dict[str, tuple[float, float]],
     radii: dict[str, tuple[float, float]] | None = None,
     use_ml: bool = True,
+    hand: np.ndarray | None = None,
 ) -> tuple[dict[str, np.ndarray], str, bool, dict]:
-    """Вернуть (маски частей, метод, фоллбек ли, статистика)."""
+    """Вернуть (маски частей, метод, фоллбек ли, статистика).
+
+    `hand` — ручная карта частей в номерах костей этого шаблона (0 — не
+    трогать); ложится последней, поверх всего, что решили капсулы и SAM2.
+    """
     shape = alpha.shape
     silhouette = alpha > 16
     fields, names = capsule_fields(shape, template, joints, radii)
@@ -164,6 +190,16 @@ def run(
     else:
         method, fallback = "capsules", True
 
+    # правка человека — последней: он видит, где кончается хвост и начинается
+    # нога, лучше и капсул, и SAM2 (принцип №1 в DESIGN.md)
+    hand_px = 0
+    if hand is not None and hand.shape == shape:
+        touched = (hand > 0) & silhouette
+        hand_px = int(touched.sum())
+        if hand_px:
+            owner = np.where(touched, hand.astype(np.int16) - 1, owner)
+            method += "+hand"
+
     masks = {
         name: (silhouette & (owner == i)).astype(np.uint8) * 255
         for i, name in enumerate(names)
@@ -171,6 +207,7 @@ def run(
     stats = {
         "parts": len(masks),
         "sam_parts": accepted,
+        "hand_px": hand_px,
         "empty_parts": sorted(n for n, m in masks.items() if m.max() == 0),
         "silhouette_px": int(silhouette.sum()),
     }

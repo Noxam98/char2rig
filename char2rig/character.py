@@ -8,6 +8,8 @@
       skeleton.json           авто-скелет
       skeleton.overrides.json ручные дельты суставов (фаза 1)
       masks/<part>.png        маска на часть
+      masks.overrides.png     ручной перенос пикселей между частями
+      masks.overrides.json    легенда к нему: номер → имя кости, хеш арта
       layers/<part>.png       RGBA-слой части
       rig.json                риг
       preview.gif             стресс-тест
@@ -84,6 +86,16 @@ class Character:
     @property
     def masks_dir(self) -> Path:
         return self.root / "masks"
+
+    @property
+    def parts_overrides(self) -> Path:
+        """Ручная карта частей: значение = номер кости + 1, 0 — не трогать."""
+        return self.root / "masks.overrides.png"
+
+    @property
+    def parts_legend(self) -> Path:
+        """К карте частей: какому имени соответствует номер, плюс хеш арта."""
+        return self.root / "masks.overrides.json"
 
     @property
     def layers_dir(self) -> Path:
