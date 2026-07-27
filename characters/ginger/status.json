@@ -1,0 +1,75 @@
+{
+  "name": "ginger",
+  "created": "2026-07-27T21:22:27+03:00",
+  "stages": {
+    "background": {
+      "method": "rembg",
+      "fallback": false,
+      "at": "2026-07-27T21:47:43+03:00"
+    },
+    "pose": {
+      "method": "bbox_fit+dwpose_snap",
+      "fallback": false,
+      "at": "2026-07-27T21:47:50+03:00",
+      "bbox": [
+        102,
+        76,
+        529,
+        877
+      ],
+      "scale": 831.28,
+      "x_scale": 0.977,
+      "pose_conf": 0.75,
+      "candidates": {
+        "bbox_fit": 0.571,
+        "dwpose_similarity": 0.673,
+        "dwpose_snap": 0.683,
+        "drawn_pose_similarity": 0.649,
+        "drawn_pose_snap": 0.656
+      },
+      "chains": [
+        "tail"
+      ],
+      "fit_iou": 0.702,
+      "fit_inside": 0.87
+    },
+    "segment": {
+      "method": "capsules",
+      "fallback": true,
+      "at": "2026-07-27T21:47:56+03:00",
+      "parts": 17,
+      "sam_parts": [],
+      "empty_parts": [],
+      "silhouette_px": 187677
+    },
+    "layers": {
+      "method": "overlap_cut+lama",
+      "fallback": false,
+      "at": "2026-07-27T21:48:03+03:00",
+      "layers": 17,
+      "uncovered_px": 0,
+      "uncovered_ratio": 0.0,
+      "ring_px": 10059,
+      "hidden_px": 2666
+    },
+    "rig": {
+      "method": "joint_pivots",
+      "fallback": false,
+      "at": "2026-07-27T21:48:03+03:00",
+      "bones": 17
+    }
+  },
+  "checks": {
+    "frames": 24,
+    "seam_gap_px": 1332,
+    "seam_gap_ratio": 0.01572,
+    "rest_gap_ratio": 0.10917,
+    "worst_frame": 19,
+    "uncovered_px": 0,
+    "uncovered_ratio": 0.0,
+    "fit_inside": 0.87,
+    "fit_iou": 0.702
+  },
+  "updated": "2026-07-27T21:48:33+03:00",
+  "triage": "red"
+}

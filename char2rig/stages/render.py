@@ -234,8 +234,10 @@ def triage(checks: dict) -> str:
 
     - `seam_gap_ratio` — насколько при движении открывается тело, которого
       не закрыл ни один слой. Это швы, лечится нахлёстом.
-    - `fit_iou` (с этапа позы) — совпадение капсул скелета с силуэтом.
-      Это посадка, лечится правкой суставов.
+    - `fit_inside` (с этапа позы) — какая доля капсул скелета лежит внутри
+      арта. Это посадка, лечится правкой суставов. Не IoU: уши, клочья
+      шерсти и пушистый хвост капсулой не описываются, и IoU на живом арте
+      упирается в потолок, не имеющий отношения к качеству рига.
     - `uncovered_ratio` — пиксели арта, не попавшие ни в одну часть.
 
     Щели в позе покоя (`rest_gap_ratio`) в триаже не участвуют: у живого
@@ -244,9 +246,9 @@ def triage(checks: dict) -> str:
     """
     seam = checks.get("seam_gap_ratio", 0.0)
     uncovered = checks.get("uncovered_ratio", 0.0)
-    fit = checks.get("fit_iou", 1.0)
-    if seam < 0.002 and uncovered < 0.0005 and fit >= 0.85:
+    fit = checks.get("fit_inside", 1.0)
+    if seam < 0.002 and uncovered < 0.0005 and fit >= 0.95:
         return "green"
-    if seam < 0.01 and uncovered < 0.005 and fit >= 0.7:
+    if seam < 0.01 and uncovered < 0.005 and fit >= 0.88:
         return "yellow"
     return "red"

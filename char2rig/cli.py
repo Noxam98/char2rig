@@ -48,7 +48,7 @@ def run_pipeline(
             if char.skeleton_overrides.exists()
             else None
         )
-        joints, method, fallback, params = pose.run(
+        joints, radii, method, fallback, params = pose.run(
             template, rgba, alpha, use_ml, overrides
         )
         char.write_json(
@@ -57,7 +57,12 @@ def run_pipeline(
                 "template": template.name,
                 "size": [width, height],
                 "fit": params,
-                "joints": {k: [round(v[0], 2), round(v[1], 2)] for k, v in joints.items()},
+                "joints": {
+                    k: [round(v[0], 2), round(v[1], 2)] for k, v in joints.items()
+                },
+                "radii": {
+                    k: [round(v[0], 2), round(v[1], 2)] for k, v in radii.items()
+                },
             },
         )
         char.record_stage("pose", method, fallback, **params)
@@ -65,12 +70,13 @@ def run_pipeline(
     else:
         saved = char.read_json(char.skeleton)
         joints = {k: (v[0], v[1]) for k, v in saved["joints"].items()}
+        radii = {k: (v[0], v[1]) for k, v in saved.get("radii", {}).items()} or None
 
     unit = segment.pixels_per_unit(joints, template)
 
     if _from(start, "segment"):
         masks, method, fallback, stats = segment.run(
-            template, rgba, alpha, joints, use_ml
+            template, rgba, alpha, joints, radii, use_ml
         )
         for name, mask in masks.items():
             char.write_mask(char.masks_dir / f"{name}.png", mask)
@@ -84,14 +90,16 @@ def run_pipeline(
 
     if _from(start, "layers"):
         cut, method, fallback, stats = layers.run(
-            template, rgba, alpha, joints, masks, unit, use_ml
+            template, rgba, alpha, joints, masks, unit, radii, use_ml
         )
         char.record_stage("layers", method, fallback, **stats)
         say(
             f"  слои:     {stats['layers']} шт ({method}), непокрытых пикселей "
             f"{stats['uncovered_px']}, скрытых {stats['hidden_px']}"
         )
-        rig_data = rig.run(char, template, joints, cut, (width, height), unit)
+        rig_data = rig.run(
+            char, template, joints, cut, (width, height), unit, radii
+        )
         char.record_stage("rig", "joint_pivots", False, bones=len(rig_data["bones"]))
     else:
         rig_data = char.read_json(char.rig)
@@ -100,13 +108,15 @@ def run_pipeline(
     images = rig.load_images(char, rig_data)
     checks = render.swing(char, rig_data, images)
     checks.update({k: v for k, v in stats.items() if k.startswith("uncovered")})
-    checks["fit_iou"] = char.status()["stages"].get("pose", {}).get("fit_iou", 1.0)
+    pose_stage = char.status()["stages"].get("pose", {})
+    checks["fit_inside"] = pose_stage.get("fit_inside", 1.0)
+    checks["fit_iou"] = pose_stage.get("fit_iou", 1.0)
     verdict = render.triage(checks)
     char.record_checks(checks, verdict)
     say(
         f"  свинг:    {checks['frames']} кадров, швы "
         f"{checks['seam_gap_ratio']:.3%} (худший кадр {checks['worst_frame']}), "
-        f"посадка IoU {checks['fit_iou']:.2f} → {verdict}"
+        f"скелет внутри арта {checks['fit_inside']:.2f} → {verdict}"
     )
     say(f"  готово:   {char.preview}")
     return checks

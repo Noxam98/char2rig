@@ -128,13 +128,13 @@
       ],
       "rest_angle": -1.570796,
       "length": 205.55,
-      "radius_a": 70.86,
-      "radius_b": 59.39,
+      "radius_a": 66.0,
+      "radius_b": 98.0,
       "z": 20,
       "image": "layers/torso.png",
       "offset": [
-        153,
-        163
+        146,
+        128
       ],
       "pivot": [
         256.5,
@@ -158,12 +158,12 @@
       ],
       "rest_angle": -1.570796,
       "length": 124.68,
-      "radius_a": 48.59,
-      "radius_b": 60.74,
+      "radius_a": 52.0,
+      "radius_b": 62.0,
       "z": 40,
       "image": "layers/head.png",
       "offset": [
-        153,
+        184,
         25
       ],
       "pivot": [
@@ -188,13 +188,13 @@
       ],
       "rest_angle": 2.192174,
       "length": 111.9,
-      "radius_a": 32.39,
-      "radius_b": 27.0,
+      "radius_a": 26.0,
+      "radius_b": 20.0,
       "z": 22,
       "image": "layers/arm_upper_r.png",
       "offset": [
-        109,
-        203
+        115,
+        211
       ],
       "pivot": [
         198.22,
@@ -218,13 +218,13 @@
       ],
       "rest_angle": 0.949418,
       "length": 111.9,
-      "radius_a": 32.39,
-      "radius_b": 27.0,
+      "radius_a": 30.0,
+      "radius_b": 26.0,
       "z": 26,
       "image": "layers/arm_upper_l.png",
       "offset": [
-        272,
-        202
+        277,
+        207
       ],
       "pivot": [
         314.78,
@@ -248,13 +248,13 @@
       ],
       "rest_angle": 1.863601,
       "length": 95.03,
-      "radius_a": 41.84,
-      "radius_b": 33.74,
+      "radius_a": 39.0,
+      "radius_b": 37.0,
       "z": 8,
       "image": "layers/thigh_r.png",
       "offset": [
-        136,
-        373
+        147,
+        390
       ],
       "pivot": [
         215.36,
@@ -278,13 +278,13 @@
       ],
       "rest_angle": 1.277991,
       "length": 95.03,
-      "radius_a": 41.84,
-      "radius_b": 33.74,
+      "radius_a": 36.0,
+      "radius_b": 32.0,
       "z": 12,
       "image": "layers/thigh_l.png",
       "offset": [
-        261,
-        372
+        272,
+        394
       ],
       "pivot": [
         297.64,
@@ -308,13 +308,13 @@
       ],
       "rest_angle": 2.514255,
       "length": 103.33,
-      "radius_a": 24.3,
-      "radius_b": 18.9,
+      "radius_a": 46.16,
+      "radius_b": 18.0,
       "z": -2,
       "image": "layers/tail_1.png",
       "offset": [
-        115,
-        450
+        119,
+        433
       ],
       "pivot": [
         223.59,
@@ -338,13 +338,13 @@
       ],
       "rest_angle": 2.137205,
       "length": 95.84,
-      "radius_a": 27.0,
-      "radius_b": 21.6,
+      "radius_a": 22.0,
+      "radius_b": 19.0,
       "z": 23,
       "image": "layers/arm_fore_r.png",
       "offset": [
-        62,
-        301
+        64,
+        307
       ],
       "pivot": [
         133.07,
@@ -368,13 +368,13 @@
       ],
       "rest_angle": 1.004388,
       "length": 95.84,
-      "radius_a": 27.0,
-      "radius_b": 21.6,
+      "radius_a": 25.0,
+      "radius_b": 26.0,
       "z": 27,
       "image": "layers/arm_fore_l.png",
       "offset": [
-        344,
-        301
+        345,
+        303
       ],
       "pivot": [
         379.93,
@@ -398,13 +398,13 @@
       ],
       "rest_angle": 1.312885,
       "length": 94.09,
-      "radius_a": 33.74,
-      "radius_b": 22.95,
+      "radius_a": 30.0,
+      "radius_b": 18.0,
       "z": 9,
       "image": "layers/shin_r.png",
       "offset": [
-        146,
-        472
+        148,
+        476
       ],
       "pivot": [
         187.93,
@@ -428,8 +428,8 @@
       ],
       "rest_angle": 1.828708,
       "length": 94.09,
-      "radius_a": 33.74,
-      "radius_b": 22.95,
+      "radius_a": 33.0,
+      "radius_b": 20.0,
       "z": 13,
       "image": "layers/shin_l.png",
       "offset": [
@@ -458,13 +458,13 @@
       ],
       "rest_angle": 2.038166,
       "length": 94.36,
-      "radius_a": 18.9,
-      "radius_b": 13.5,
+      "radius_a": 14.0,
+      "radius_b": 10.0,
       "z": -3,
       "image": "layers/tail_2.png",
       "offset": [
         86,
-        492
+        494
       ],
       "pivot": [
         139.93,
@@ -488,13 +488,13 @@
       ],
       "rest_angle": 2.130208,
       "length": 51.68,
-      "radius_a": 24.3,
-      "radius_b": 20.25,
+      "radius_a": 25.0,
+      "radius_b": 17.0,
       "z": 24,
       "image": "layers/hand_r.png",
       "offset": [
         32,
-        385
+        384
       ],
       "pivot": [
         81.65,
@@ -518,13 +518,13 @@
       ],
       "rest_angle": 1.011385,
       "length": 51.68,
-      "radius_a": 24.3,
-      "radius_b": 20.25,
+      "radius_a": 24.0,
+      "radius_b": 14.0,
       "z": 28,
       "image": "layers/hand_l.png",
       "offset": [
-        397,
-        385
+        400,
+        386
       ],
       "pivot": [
         431.35,
@@ -548,8 +548,8 @@
       ],
       "rest_angle": 1.783361,
       "length": 113.76,
-      "radius_a": 22.95,
-      "radius_b": 20.25,
+      "radius_a": 23.0,
+      "radius_b": 18.0,
       "z": 10,
       "image": "layers/foot_r.png",
       "offset": [
@@ -578,13 +578,13 @@
       ],
       "rest_angle": 1.358232,
       "length": 113.76,
-      "radius_a": 22.95,
-      "radius_b": 20.25,
+      "radius_a": 20.0,
+      "radius_b": 17.0,
       "z": 14,
       "image": "layers/foot_l.png",
       "offset": [
         272,
-        575
+        579
       ],
       "pivot": [
         301.07,
@@ -608,13 +608,13 @@
       ],
       "rest_angle": 1.819879,
       "length": 83.45,
-      "radius_a": 13.5,
-      "radius_b": 6.75,
+      "radius_a": 7.42,
+      "radius_b": 7.0,
       "z": -4,
       "image": "layers/tail_3.png",
       "offset": [
         73,
-        581
+        578
       ],
       "pivot": [
         97.42,

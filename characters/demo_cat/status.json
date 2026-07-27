@@ -5,12 +5,12 @@
     "background": {
       "method": "source_alpha",
       "fallback": true,
-      "at": "2026-07-27T21:09:36+03:00"
+      "at": "2026-07-27T21:49:09+03:00"
     },
     "pose": {
       "method": "bbox_fit",
       "fallback": true,
-      "at": "2026-07-27T21:09:43+03:00",
+      "at": "2026-07-27T21:49:09+03:00",
       "bbox": [
         34,
         27,
@@ -19,60 +19,46 @@
       ],
       "scale": 673.934,
       "x_scale": 1.017,
-      "candidates": {
-        "bbox_fit": 0.91,
-        "dwpose_similarity": 0.737,
-        "dwpose_snap": 0.841,
-        "drawn_pose_snap": 0.825
-      },
-      "fit_iou": 0.91
+      "fit_iou": 0.865,
+      "fit_inside": 0.931
     },
     "segment": {
-      "method": "sam2+capsules",
-      "fallback": false,
-      "at": "2026-07-27T21:09:49+03:00",
+      "method": "capsules",
+      "fallback": true,
+      "at": "2026-07-27T21:49:09+03:00",
       "parts": 17,
-      "sam_parts": [
-        "arm_upper_r",
-        "hand_r",
-        "arm_upper_l",
-        "arm_fore_l",
-        "hand_l",
-        "shin_r",
-        "foot_r",
-        "shin_l",
-        "foot_l"
-      ],
+      "sam_parts": [],
       "empty_parts": [],
       "silhouette_px": 116807
     },
     "layers": {
-      "method": "overlap_cut+lama",
-      "fallback": false,
-      "at": "2026-07-27T21:09:55+03:00",
+      "method": "overlap_cut+nearest_fill",
+      "fallback": true,
+      "at": "2026-07-27T21:49:10+03:00",
       "layers": 17,
       "uncovered_px": 0,
       "uncovered_ratio": 0.0,
-      "ring_px": 9465,
-      "hidden_px": 2114
+      "ring_px": 9275,
+      "hidden_px": 1663
     },
     "rig": {
       "method": "joint_pivots",
       "fallback": false,
-      "at": "2026-07-27T21:09:55+03:00",
+      "at": "2026-07-27T21:49:10+03:00",
       "bones": 17
     }
   },
   "checks": {
     "frames": 24,
     "seam_gap_px": 0,
-    "seam_gap_ratio": 0.0002,
-    "rest_gap_ratio": 0.01288,
+    "seam_gap_ratio": 0.00029,
+    "rest_gap_ratio": 0.03166,
     "worst_frame": 22,
     "uncovered_px": 0,
     "uncovered_ratio": 0.0,
-    "fit_iou": 0.91
+    "fit_inside": 0.931,
+    "fit_iou": 0.865
   },
-  "updated": "2026-07-27T21:10:13+03:00",
-  "triage": "green"
+  "updated": "2026-07-27T21:49:25+03:00",
+  "triage": "yellow"
 }

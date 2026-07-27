@@ -25,8 +25,13 @@ def capsule_fields(
     shape: tuple[int, int],
     template: Template,
     joints: dict[str, tuple[float, float]],
+    radii: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[np.ndarray, list[str]]:
-    """Поля расстояний до капсул всех костей + порядок имён."""
+    """Поля расстояний до капсул всех костей + порядок имён.
+
+    `radii` — измеренная по силуэту толщина в пикселях; без неё берутся
+    пропорции шаблона, что верно только для эталонного телосложения.
+    """
     grid = pixel_grid(shape)
     unit = pixels_per_unit(joints, template)
     names = [b.name for b in template.bones]
@@ -36,8 +41,7 @@ def capsule_fields(
                 shape,
                 joints[b.a],
                 joints[b.b],
-                b.ra * unit,
-                b.rb * unit,
+                *(radii[b.name] if radii else (b.ra * unit, b.rb * unit)),
                 grid=grid,
             )
             for b in template.bones
@@ -127,12 +131,13 @@ def run(
     rgba: np.ndarray,
     alpha: np.ndarray,
     joints: dict[str, tuple[float, float]],
+    radii: dict[str, tuple[float, float]] | None = None,
     use_ml: bool = True,
 ) -> tuple[dict[str, np.ndarray], str, bool, dict]:
     """Вернуть (маски частей, метод, фоллбек ли, статистика)."""
     shape = alpha.shape
     silhouette = alpha > 16
-    fields, names = capsule_fields(shape, template, joints)
+    fields, names = capsule_fields(shape, template, joints, radii)
     owner = capsule_owner(fields, template)
     capsules = {n: (fields[i] < 0) & silhouette for i, n in enumerate(names)}
 

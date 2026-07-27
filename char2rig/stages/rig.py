@@ -23,6 +23,7 @@ def build(
     layers: dict[str, dict],
     size: tuple[int, int],
     unit: float,
+    radii: dict[str, tuple[float, float]] | None = None,
 ) -> dict:
     bones = []
     for bone in template.ordered_bones():
@@ -39,8 +40,12 @@ def build(
                 "rest_b": [round(b[0], 2), round(b[1], 2)],
                 "rest_angle": round(angle_of(a, b), 6),
                 "length": round(length_of(a, b), 2),
-                "radius_a": round(bone.ra * unit, 2),
-                "radius_b": round(bone.rb * unit, 2),
+                "radius_a": round(
+                    radii[bone.name][0] if radii else bone.ra * unit, 2
+                ),
+                "radius_b": round(
+                    radii[bone.name][1] if radii else bone.rb * unit, 2
+                ),
                 "z": bone.z,
                 "image": f"layers/{bone.name}.png",
                 "offset": [int(layer["offset"][0]), int(layer["offset"][1])],
@@ -64,11 +69,12 @@ def run(
     layers: dict[str, dict],
     size: tuple[int, int],
     unit: float,
+    radii: dict[str, tuple[float, float]] | None = None,
 ) -> dict:
     """Записать слои и rig.json на диск, вернуть риг."""
     for name, layer in layers.items():
         char.write_rgba(char.layers_dir / f"{name}.png", layer["image"])
-    rig = build(template, joints, layers, size, unit)
+    rig = build(template, joints, layers, size, unit, radii)
     char.write_json(char.rig, rig)
     return rig
 

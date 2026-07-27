@@ -199,11 +199,18 @@ def _subtree(template: Template, joint: str) -> set[str]:
     return moving
 
 
+def _inside(point: tuple[float, float], alpha: np.ndarray) -> bool:
+    height, width = alpha.shape
+    x, y = int(round(point[0])), int(round(point[1]))
+    return 0 <= y < height and 0 <= x < width and alpha[y, x] > 16
+
+
 def _snap_joints(
     template: Template,
     joints: dict[str, tuple[float, float]],
     keypoints: np.ndarray,
     scores: np.ndarray,
+    alpha: np.ndarray | None = None,
 ) -> dict[str, tuple[float, float]] | None:
     """Посадить найденные суставы точно, утащив за каждым его цепочку.
 
@@ -220,6 +227,11 @@ def _snap_joints(
         if name not in moved:
             continue
         target = keypoints[index]
+        # детектор промахивается мимо персонажа — на реальном коте он вынес
+        # лодыжку наружу, и вся нога уехала за силуэт. Такую точку не берём:
+        # общий IoU может даже вырасти за счёт других, и промах не заметят
+        if alpha is not None and not _inside((target[0], target[1]), alpha):
+            continue
         dx = float(target[0]) - moved[name][0]
         dy = float(target[1]) - moved[name][1]
         for joint in _subtree(template, name):
@@ -230,13 +242,24 @@ def _snap_joints(
 
 
 def _agreement(
-    template: Template, joints: dict[str, tuple[float, float]], alpha: np.ndarray
-) -> float:
-    """IoU «тела по скелету» с силуэтом: насколько посадка вообще про этот арт.
+    template: Template,
+    joints: dict[str, tuple[float, float]],
+    alpha: np.ndarray,
+    radii: dict[str, tuple[float, float]] | None = None,
+) -> tuple[float, float]:
+    """Насколько «тело по скелету» согласуется с силуэтом: (IoU, доля внутри).
 
-    Считаем именно по капсулам, а не по попаданию суставов внутрь силуэта:
-    сустав может лежать в силуэте, а капсула вокруг него — торчать наружу,
-    и потом ровно это вылезает щелями в стресс-тесте.
+    Считаем по капсулам, а не по попаданию суставов внутрь силуэта: сустав
+    может лежать в силуэте, а капсула вокруг него — торчать наружу, и потом
+    ровно это вылезает щелями в стресс-тесте.
+
+    Две меры нужны разные. **IoU** годится, чтобы сравнить кандидатов между
+    собой — радиусы у них одни и те же, значит сравнение честное. А вот
+    оценивать им качество посадки нельзя: уши, клочья шерсти и пушистый
+    хвост капсулой не описываются в принципе, и на живом арте IoU упирается
+    в потолок, который не имеет отношения к качеству рига. Дефект — это
+    когда скелет считает телом то, где арта нет; его и меряет **доля
+    капсул внутри силуэта**.
     """
     import cv2
 
@@ -249,20 +272,276 @@ def _agreement(
     unit = pixels_per_unit(scaled, template)
     body = np.zeros(shape, dtype=bool)
     for bone in template.bones:
+        ra, rb = (
+            (bone.ra * unit, bone.rb * unit)
+            if radii is None
+            else (
+                radii[bone.name][0] * FIT_SCALE,
+                radii[bone.name][1] * FIT_SCALE,
+            )
+        )
+        body |= (
+            capsule_field(shape, scaled[bone.a], scaled[bone.b], ra, rb, grid=grid) < 0
+        )
+    silhouette = small > 16
+    union = int((body | silhouette).sum())
+    inside = int((body & silhouette).sum())
+    return (inside / max(union, 1), inside / max(int(body.sum()), 1))
+
+
+CHAIN_SCALE = 0.25  # поиск отростка идёт в уменьшенном разрешении
+CHAIN_MIN_AREA = 0.004  # мельче этой доли силуэта — не отросток, а шум
+CHAIN_MIN_DEPTH = 0.03  # и торчать должен хотя бы на эту долю высоты
+CHAIN_MAX_REACH = 0.4  # отросток ищем не дальше этого от корня цепочки
+
+
+def _capsule_body(
+    template: Template,
+    joints: dict[str, tuple[float, float]],
+    shape: tuple[int, int],
+    skip: set[str],
+) -> np.ndarray:
+    """Маска «где скелет считает тело», без указанных костей."""
+    grid = pixel_grid(shape)
+    unit = pixels_per_unit(joints, template)
+    body = np.zeros(shape, dtype=bool)
+    for bone in template.bones:
+        if bone.name in skip:
+            continue
         body |= (
             capsule_field(
                 shape,
-                scaled[bone.a],
-                scaled[bone.b],
+                joints[bone.a],
+                joints[bone.b],
                 bone.ra * unit,
                 bone.rb * unit,
                 grid=grid,
             )
             < 0
         )
-    silhouette = small > 16
-    union = int((body | silhouette).sum())
-    return int((body & silhouette).sum()) / max(union, 1)
+    return body
+
+
+def _geodesic_path(
+    mask: np.ndarray, start: tuple[int, int], thickness: np.ndarray | None = None
+) -> list[tuple[int, int]]:
+    """Путь от начальной точки до самой дальней внутри маски.
+
+    Волной от старта, не по прямой: хвост загибается, и прямая через него
+    вышла бы наружу. Считается по маске, а не по скелетизации, — так проще
+    и не зависит от scipy, которого в ядре нет.
+
+    При возврате из дальней точки из равных по шагу соседей берётся самый
+    толстый — иначе путь липнет к краю отростка, и померенная по нему
+    толщина выходит втрое меньше настоящей.
+    """
+    import cv2
+
+    frontier = np.zeros(mask.shape, dtype=bool)
+    frontier[start[1], start[0]] = True
+    if not mask[start[1], start[0]]:
+        return []
+    steps = np.full(mask.shape, -1, dtype=np.int32)
+    steps[frontier] = 0
+    kernel = np.ones((3, 3), np.uint8)
+    step = 0
+    while True:
+        grown = (
+            cv2.dilate(frontier.astype(np.uint8), kernel).astype(bool) & mask
+        )
+        fresh = grown & (steps < 0)
+        if not fresh.any():
+            break
+        step += 1
+        steps[fresh] = step
+        frontier = fresh
+
+    far = np.argmax(np.where(steps >= 0, steps, -1))
+    y, x = np.unravel_index(far, steps.shape)
+    path = [(int(x), int(y))]
+    for back in range(int(steps[y, x]) - 1, -1, -1):
+        top, left = max(y - 1, 0), max(x - 1, 0)
+        window = steps[top : y + 2, left : x + 2]
+        found = np.argwhere(window == back)
+        if len(found) == 0:
+            break
+        if thickness is not None:
+            fat = np.argmax(
+                [thickness[top + int(dy), left + int(dx)] for dy, dx in found]
+            )
+            dy, dx = found[int(fat)]
+        else:
+            dy, dx = found[0]
+        y, x = top + int(dy), left + int(dx)
+        path.append((int(x), int(y)))
+    path.reverse()
+    return path
+
+
+def fit_chain(
+    template: Template,
+    chain: str,
+    joints: dict[str, tuple[float, float]],
+    alpha: np.ndarray,
+) -> tuple[dict[str, tuple[float, float]], dict[str, tuple[float, float]]] | None:
+    """Посадить опциональную цепочку (хвост) на непокрытый отросток силуэта.
+
+    Шаблон кладёт хвост туда, где он был у эталона, — а у живого кота он
+    уходит куда угодно. Детекторы поз про хвосты не знают вовсе (в COCO их
+    нет), зато силуэт знает: хвост — это ровно тот кусок арта, до которого
+    не дотянулась ни одна капсула. Ищем такой кусок рядом с корнем цепочки
+    и раскладываем по нему кости.
+
+    Заодно меряем толщину прямо по найденному отростку и возвращаем радиусы:
+    общий замер поперёк кости на хвосте врёт, потому что кость — это хорда, а
+    хвост загнут, и луч уходит наружу раньше времени. Тонкая капсула хвоста
+    потом отдаёт его пиксели жирной капсуле бедра, и хвост улетает с ногой.
+    """
+    import cv2
+
+    bones = [template.bone(name) for name in template.chains.get(chain, ())]
+    # цепочка должна быть именно цепочкой: кость за костью. «digitigrade-ноги»
+    # из шаблона — это две отдельные стопы, их так сажать нельзя
+    if not bones or any(
+        child.parent != parent.name for parent, child in zip(bones, bones[1:])
+    ):
+        return None
+    root = bones[0].a
+
+    small = cv2.resize(
+        alpha, None, fx=CHAIN_SCALE, fy=CHAIN_SCALE, interpolation=cv2.INTER_AREA
+    )
+    shape = small.shape
+    scaled = {k: (x * CHAIN_SCALE, y * CHAIN_SCALE) for k, (x, y) in joints.items()}
+    body = _capsule_body(template, scaled, shape, skip={b.name for b in bones})
+    unclaimed = (small > 16) & ~body
+
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(
+        unclaimed.astype(np.uint8), 8
+    )
+    if count <= 1:
+        return None
+    silhouette_area = max(int((small > 16).sum()), 1)
+    # насколько глубоко кусок торчит из тела: у хвоста это десятки пикселей,
+    # у кромки вдоль руки — единицы. Именно это отличает отросток от каймы,
+    # а близость к корню — нет: кайма проходит вплотную к нему
+    depth = cv2.distanceTransform((~body).astype(np.uint8), cv2.DIST_L2, 3)
+    rx, ry = scaled[root]
+    best, best_depth = None, CHAIN_MIN_DEPTH * shape[0]
+    for index in range(1, count):
+        if stats[index, cv2.CC_STAT_AREA] < CHAIN_MIN_AREA * silhouette_area:
+            continue
+        piece = labels == index
+        ys, xs = np.nonzero(piece)
+        if float(np.min(np.hypot(xs - rx, ys - ry))) > CHAIN_MAX_REACH * shape[0]:
+            continue
+        reach = float(depth[piece].max())
+        if reach > best_depth:
+            best, best_depth = piece, reach
+    if best is None:
+        return None
+
+    thickness = cv2.distanceTransform((small > 16).astype(np.uint8), cv2.DIST_L2, 3)
+    ys, xs = np.nonzero(best)
+    start_index = int(np.argmin(np.hypot(xs - rx, ys - ry)))
+    path = _geodesic_path(
+        best, (int(xs[start_index]), int(ys[start_index])), thickness
+    )
+    if len(path) < len(bones) * 2:
+        return None
+
+    moved = dict(joints)
+    positions = [path[0]] + [
+        path[min(len(path) - 1, round((i + 1) * (len(path) - 1) / len(bones)))]
+        for i in range(len(bones))
+    ]
+    for bone, point in zip(bones, positions[1:]):
+        moved[bone.b] = (point[0] / CHAIN_SCALE, point[1] / CHAIN_SCALE)
+    moved[root] = (positions[0][0] / CHAIN_SCALE, positions[0][1] / CHAIN_SCALE)
+
+    # толщину берём не в самой точке, а по окрестности вдоль пути: концы
+    # пути лежат на границе отростка, там расстояние до фона почти нулевое
+    window = max(len(path) // (2 * len(bones)), 2)
+    indices = [0] + [
+        min(len(path) - 1, round((i + 1) * (len(path) - 1) / len(bones)))
+        for i in range(len(bones))
+    ]
+    at = []
+    for index in indices:
+        near = path[max(index - window, 0) : index + window + 1]
+        at.append(
+            max(float(thickness[p[1], p[0]]) for p in near) / CHAIN_SCALE
+            if near
+            else 4.0
+        )
+    radii = {
+        bone.name: (max(at[i], 2.0), max(at[i + 1], 2.0))
+        for i, bone in enumerate(bones)
+    }
+    return moved, radii
+
+
+RADIUS_LIMITS = (0.55, 1.9)  # во сколько раз кость может отличаться от шаблона
+
+
+def measure_radii(
+    template: Template,
+    joints: dict[str, tuple[float, float]],
+    alpha: np.ndarray,
+) -> dict[str, tuple[float, float]]:
+    """Померить толщину персонажа вдоль каждой кости.
+
+    Шаблон задаёт пропорции эталона, а живой кот бывает тощим или пузатым, и
+    капсула из шаблона либо не покрывает арт, либо вылезает наружу — и то и
+    другое портит и разбиение на части, и проверки. Расстояние до фона в
+    точке оси — это ровно половина местной толщины, её и берём, зажимая
+    относительно шаблона: рядом с плечом внутри торса замер завышен.
+    """
+    height, width = alpha.shape
+    unit = pixels_per_unit(joints, template)
+    solid = alpha > 16
+    reach = max(int(0.35 * unit), 4)
+    steps = np.arange(1, reach + 1, dtype=np.float32)
+
+    def half_width(x: float, y: float, nx: float, ny: float) -> float:
+        """Докуда добивает луч поперёк кости, прежде чем выйти из силуэта."""
+        xs = np.clip(np.round(x + nx * steps).astype(int), 0, width - 1)
+        ys = np.clip(np.round(y + ny * steps).astype(int), 0, height - 1)
+        outside = np.flatnonzero(~solid[ys, xs])
+        return float(steps[outside[0]]) if len(outside) else float(reach)
+
+    def measure(bone, position: float, fallback: float) -> float:
+        ax, ay = joints[bone.a]
+        bx, by = joints[bone.b]
+        dx, dy = bx - ax, by - ay
+        length = float(np.hypot(dx, dy))
+        if length < 1e-3:
+            return fallback
+        nx, ny = -dy / length, dx / length
+        samples = []
+        for shift in (-0.08, 0.0, 0.08):
+            t = min(max(position + shift, 0.0), 1.0)
+            x, y = ax + dx * t, ay + dy * t
+            if not (0 <= int(y) < height and 0 <= int(x) < width and solid[int(y), int(x)]):
+                continue
+            # меньшая из сторон: рука, прижатая к телу, наружу выходит сразу,
+            # а внутрь луч уйдёт через весь торс и намерит его ширину
+            samples.append(
+                min(half_width(x, y, nx, ny), half_width(x, y, -nx, -ny))
+            )
+        if not samples:
+            return fallback
+        measured = float(np.median(samples))
+        low, high = RADIUS_LIMITS
+        return float(np.clip(measured, fallback * low, fallback * high))
+
+    return {
+        bone.name: (
+            measure(bone, 0.2, bone.ra * unit),
+            measure(bone, 0.8, bone.rb * unit),
+        )
+        for bone in template.bones
+    }
 
 
 def run(
@@ -271,8 +550,8 @@ def run(
     alpha: np.ndarray,
     use_ml: bool = True,
     overrides: dict | None = None,
-) -> tuple[dict, str, bool, dict]:
-    """Вернуть (суставы, метод, фоллбек ли, параметры посадки)."""
+) -> tuple[dict, dict, str, bool, dict]:
+    """Вернуть (суставы, радиусы костей в px, метод, фоллбек ли, параметры)."""
     joints, params = fit_bbox(template, alpha)
     method, fallback = "bbox_fit", True
 
@@ -281,7 +560,7 @@ def run(
         # может уехать. Поэтому не верим ни одному на слово: каждый даёт
         # кандидата, а выбирает силуэт (торчащая наружу капсула потом
         # вылезает щелями). Посадка по bbox участвует наравне с моделями.
-        best = _agreement(template, joints, alpha)
+        best = _agreement(template, joints, alpha)[0]
         scores = {"bbox_fit": round(best, 3)}
         for name, detector in (
             ("dwpose", _try_dwpose),
@@ -298,14 +577,14 @@ def run(
                     key: (x * scale + dx, y * scale + dy)
                     for key, (x, y) in joints.items()
                 }
-            snapped = _snap_joints(template, joints, *detected)
+            snapped = _snap_joints(template, joints, *detected, alpha=alpha)
             if snapped is not None:
                 variants[f"{name}_snap"] = snapped
             if not variants:
                 note_fallback("скелет", f"{name}: мало уверенных точек")
                 continue
             for label, moved in variants.items():
-                score = _agreement(template, moved, alpha)
+                score = _agreement(template, moved, alpha)[0]
                 scores[label] = round(score, 3)
                 if score > best:
                     joints, best = moved, score
@@ -313,12 +592,31 @@ def run(
                     params["pose_conf"] = round(float(np.mean(detected[1])), 3)
         params["candidates"] = scores
 
+    # опциональные цепочки садятся последними: они цепляются за корень,
+    # который до этого мог переехать вслед за детектором
+    chain_radii: dict[str, tuple[float, float]] = {}
+    for chain in template.chains:
+        result = fit_chain(template, chain, joints, alpha)
+        if result is None:
+            continue
+        fitted, measured = result
+        if _agreement(template, fitted, alpha)[0] > _agreement(template, joints, alpha)[0]:
+            joints = fitted
+            chain_radii.update(measured)
+            params.setdefault("chains", []).append(chain)
+
     # принцип №1: ручные правки — оверлеи поверх автоматики
     for name, delta in (overrides or {}).get("joints", {}).items():
         if name in joints:
             joints[name] = (joints[name][0] + delta[0], joints[name][1] + delta[1])
 
+    # толщину меряем в самом конце, когда суставы уже на своих местах;
+    # у посаженных цепочек она уже померена по самому отростку
+    radii = measure_radii(template, joints, alpha)
+    radii.update(chain_radii)
     # итоговое совпадение с силуэтом считаем всегда: это и есть оценка
     # качества посадки, по которой персонажа красит триаж
-    params["fit_iou"] = round(_agreement(template, joints, alpha), 3)
-    return joints, method, fallback, params
+    fit_iou, fit_inside = _agreement(template, joints, alpha, radii)
+    params["fit_iou"] = round(fit_iou, 3)
+    params["fit_inside"] = round(fit_inside, 3)
+    return joints, radii, method, fallback, params

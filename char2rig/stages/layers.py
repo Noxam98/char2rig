@@ -35,10 +35,18 @@ RING_PX = 2.0  # ширина каймы за силуэтом
 SEAM_PX = 2.0  # минимальный заезд вдали от суставов — против волосяных швов
 
 
-def _overlap_px(bone, unit: float) -> float:
-    """Сколько пикселей плотного заезда дать кости."""
-    thin = min(bone.ra, bone.rb) * unit
-    return float(np.clip(0.7 * thin * bone.overlap, 4.0, 0.05 * unit))
+def _overlap_px(bone, unit: float, own: np.ndarray) -> float:
+    """Сколько пикселей плотного заезда дать кости.
+
+    Толщина берётся у самой части, а не у капсулы скелета: маска получает и
+    те пиксели, до которых капсула не дотянулась (шерсть, пушистый хвост), и
+    именно они при повороте уезжают дальше всего. На реальном коте хвост от
+    этого разваливался на куски — заезда, посчитанного по тонкой капсуле,
+    не хватало на толстую часть.
+    """
+    distance = cv2.distanceTransform(own.astype(np.uint8), cv2.DIST_L2, 3)
+    thick = float(np.percentile(distance[own], 90)) if own.any() else 0.0
+    return float(np.clip(0.7 * thick * bone.overlap, 4.0, 0.06 * unit))
 
 
 def _connection_points(
@@ -46,11 +54,16 @@ def _connection_points(
     bone: Bone,
     joints: dict[str, tuple[float, float]],
     unit: float,
+    radii: dict[str, tuple[float, float]] | None = None,
 ) -> list[tuple[tuple[float, float], float]]:
     """Суставы, которыми кость соединена с соседями: (точка, радиус сустава)."""
-    points = [(joints[bone.a], bone.ra * unit)]
+
+    def radius(item: Bone) -> float:
+        return radii[item.name][0] if radii else item.ra * unit
+
+    points = [(joints[bone.a], radius(bone))]
     points.extend(
-        (joints[child.a], child.ra * unit)
+        (joints[child.a], radius(child))
         for child in template.bones
         if child.parent == bone.name
     )
@@ -103,7 +116,9 @@ def _try_lama(rgb: np.ndarray, hidden: np.ndarray) -> np.ndarray | None:
     except Exception as exc:
         note_fallback("слои", f"LaMa упала: {type(exc).__name__}: {exc}")
         return None
-    return np.array(out)[..., :3]
+    # LaMa дополняет вход до кратности восьми и отдаёт кадр вместе с добавкой
+    height, width = rgb.shape[:2]
+    return np.array(out)[:height, :width, :3]
 
 
 def _fill_outside(rgb: np.ndarray, unknown: np.ndarray) -> np.ndarray:
@@ -133,6 +148,7 @@ def run(
     joints: dict[str, tuple[float, float]],
     masks: dict[str, np.ndarray],
     unit: float,
+    radii: dict[str, tuple[float, float]] | None = None,
     use_ml: bool = True,
 ) -> tuple[dict[str, dict], str, bool, dict]:
     """Вернуть (слои, метод, фоллбек ли, статистика).
@@ -162,8 +178,8 @@ def run(
             continue
         overlap = _overlap_map(
             shape,
-            _connection_points(template, bone, joints, unit),
-            _overlap_px(bone, unit),
+            _connection_points(template, bone, joints, unit, radii),
+            _overlap_px(bone, unit, own),
             grid,
         )
         feather = max(2.0, 0.005 * unit)
