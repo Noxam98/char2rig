@@ -5,12 +5,12 @@
     "background": {
       "method": "source_alpha",
       "fallback": true,
-      "at": "2026-07-27T21:49:09+03:00"
+      "at": "2026-07-27T21:59:46+03:00"
     },
     "pose": {
       "method": "bbox_fit",
       "fallback": true,
-      "at": "2026-07-27T21:49:09+03:00",
+      "at": "2026-07-27T21:59:46+03:00",
       "bbox": [
         34,
         27,
@@ -25,7 +25,7 @@
     "segment": {
       "method": "capsules",
       "fallback": true,
-      "at": "2026-07-27T21:49:09+03:00",
+      "at": "2026-07-27T21:59:47+03:00",
       "parts": 17,
       "sam_parts": [],
       "empty_parts": [],
@@ -34,7 +34,7 @@
     "layers": {
       "method": "overlap_cut+nearest_fill",
       "fallback": true,
-      "at": "2026-07-27T21:49:10+03:00",
+      "at": "2026-07-27T21:59:47+03:00",
       "layers": 17,
       "uncovered_px": 0,
       "uncovered_ratio": 0.0,
@@ -44,21 +44,19 @@
     "rig": {
       "method": "joint_pivots",
       "fallback": false,
-      "at": "2026-07-27T21:49:10+03:00",
+      "at": "2026-07-27T21:59:47+03:00",
       "bones": 17
     }
   },
   "checks": {
     "frames": 24,
-    "seam_gap_px": 0,
-    "seam_gap_ratio": 0.00029,
-    "rest_gap_ratio": 0.03166,
-    "worst_frame": 22,
+    "mesh_points": 291,
+    "mesh_triangles": 466,
     "uncovered_px": 0,
     "uncovered_ratio": 0.0,
     "fit_inside": 0.931,
     "fit_iou": 0.865
   },
-  "updated": "2026-07-27T21:49:25+03:00",
+  "updated": "2026-07-27T21:59:50+03:00",
   "triage": "yellow"
 }

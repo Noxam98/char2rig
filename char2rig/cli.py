@@ -24,11 +24,19 @@ def _from(start: str, stage: str) -> bool:
     return STAGES.index(stage) >= STAGES.index(start)
 
 
+def _texture(rgba: np.ndarray, alpha: np.ndarray) -> np.ndarray:
+    """Исходник с альфой силуэта: фон не должен ехать вместе с телом."""
+    texture = rgba.copy()
+    texture[..., 3] = alpha
+    return texture
+
+
 def run_pipeline(
     char: Character,
     template_name: str,
     use_ml: bool = True,
     start: str = "background",
+    preview: str = "mesh",
 ) -> dict:
     template = templates.get(template_name)
     rgba = char.read_rgba(char.source)
@@ -105,19 +113,29 @@ def run_pipeline(
         rig_data = char.read_json(char.rig)
         stats = {}
 
-    images = rig.load_images(char, rig_data)
-    checks = render.swing(char, rig_data, images)
+    if preview == "mesh":
+        checks = render.swing_mesh(char, rig_data, _texture(rgba, alpha), alpha)
+    else:
+        images = rig.load_images(char, rig_data)
+        checks = render.swing(char, rig_data, images)
     checks.update({k: v for k, v in stats.items() if k.startswith("uncovered")})
     pose_stage = char.status()["stages"].get("pose", {})
     checks["fit_inside"] = pose_stage.get("fit_inside", 1.0)
     checks["fit_iou"] = pose_stage.get("fit_iou", 1.0)
     verdict = render.triage(checks)
     char.record_checks(checks, verdict)
-    say(
-        f"  свинг:    {checks['frames']} кадров, швы "
-        f"{checks['seam_gap_ratio']:.3%} (худший кадр {checks['worst_frame']}), "
-        f"скелет внутри арта {checks['fit_inside']:.2f} → {verdict}"
-    )
+    if preview == "mesh":
+        say(
+            f"  свинг:    {checks['frames']} кадров сеткой "
+            f"({checks['mesh_triangles']} треугольников), скелет внутри арта "
+            f"{checks['fit_inside']:.2f} → {verdict}"
+        )
+    else:
+        say(
+            f"  свинг:    {checks['frames']} кадров, швы "
+            f"{checks['seam_gap_ratio']:.3%} (худший кадр {checks['worst_frame']}), "
+            f"скелет внутри арта {checks['fit_inside']:.2f} → {verdict}"
+        )
     say(f"  готово:   {char.preview}")
     return checks
 
@@ -131,7 +149,9 @@ def cmd_demo(args: argparse.Namespace) -> int:
     say(f"демо-кот {args.name} ({width}x{height}, шаблон {template.name})")
     rgba, _ = draw(template, (width, height))
     char.write_rgba(char.source, rgba)
-    run_pipeline(char, template.name, use_ml=not args.no_ml)
+    run_pipeline(
+        char, template.name, use_ml=not args.no_ml, preview=args.preview
+    )
     return 0
 
 
@@ -145,7 +165,7 @@ def cmd_dataset(args: argparse.Namespace) -> int:
         count=args.count,
         seed=args.seed,
         template_name=args.template,
-        preview=args.preview,
+        preview=args.preview_count,
         on_progress=lambda done, total: say(f"  {done}/{total}"),
     )
     say(
@@ -164,7 +184,9 @@ def cmd_process(args: argparse.Namespace) -> int:
     char = Character.open(name, args.dir)
     say(f"персонаж {name} ← {source}")
     char.write_rgba(char.source, char.read_rgba(source))
-    run_pipeline(char, args.template, use_ml=not args.no_ml)
+    run_pipeline(
+        char, args.template, use_ml=not args.no_ml, preview=args.preview
+    )
     return 0
 
 
@@ -181,7 +203,13 @@ def cmd_recut(args: argparse.Namespace) -> int:
         return 1
     saved = char.read_json(char.skeleton)
     say(f"пересборка {args.name} с этапа {args.stage}")
-    run_pipeline(char, saved["template"], use_ml=not args.no_ml, start=args.stage)
+    run_pipeline(
+        char,
+        saved["template"],
+        use_ml=not args.no_ml,
+        start=args.stage,
+        preview=args.preview,
+    )
     return 0
 
 
@@ -190,18 +218,29 @@ def cmd_swing(args: argparse.Namespace) -> int:
     if not _require(char, char.rig, f"`char2rig process <png> --name {args.name}`"):
         return 1
     rig_data = char.read_json(char.rig)
-    images = rig.load_images(char, rig_data)
-    checks = render.swing(char, rig_data, images, frames=args.frames)
+    if args.preview == "mesh":
+        alpha = char.read_mask(char.silhouette)
+        texture = _texture(char.read_rgba(char.source), alpha)
+        checks = render.swing_mesh(char, rig_data, texture, alpha, frames=args.frames)
+    else:
+        images = rig.load_images(char, rig_data)
+        checks = render.swing(char, rig_data, images, frames=args.frames)
     status = char.status()
-    checks["fit_iou"] = status["stages"].get("pose", {}).get("fit_iou", 1.0)
+    pose_stage = status["stages"].get("pose", {})
+    checks["fit_inside"] = pose_stage.get("fit_inside", 1.0)
     checks["uncovered_ratio"] = (
         status["stages"].get("layers", {}).get("uncovered_ratio", 0.0)
     )
     verdict = render.triage(checks)
     char.record_checks(checks, verdict)
+    seams = (
+        f"швы {checks['seam_gap_ratio']:.3%}, "
+        if "seam_gap_ratio" in checks
+        else ""
+    )
     say(
-        f"свинг {args.name}: швы {checks['seam_gap_ratio']:.3%}, "
-        f"посадка IoU {checks['fit_iou']:.2f} → {verdict}"
+        f"свинг {args.name}: {seams}"
+        f"скелет внутри арта {checks['fit_inside']:.2f} → {verdict}"
     )
     return 0
 
@@ -242,6 +281,12 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--no-ml", action="store_true", help="не трогать нейросети даже если стоят"
     )
+    common.add_argument(
+        "--preview",
+        choices=("mesh", "parts"),
+        default="mesh",
+        help="чем рисовать превью: деформацией сетки или жёсткими частями",
+    )
 
     parser = argparse.ArgumentParser(
         prog="char2rig",
@@ -264,7 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
     dataset.add_argument("--count", type=int, default=200)
     dataset.add_argument("--out", default="dataset")
     dataset.add_argument("--seed", type=int, default=1)
-    dataset.add_argument("--preview", type=int, default=24)
+    dataset.add_argument("--preview-count", type=int, default=24)
     dataset.add_argument("--template", default=templates.DEFAULT_TEMPLATE)
     dataset.set_defaults(func=cmd_dataset)
 

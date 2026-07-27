@@ -149,6 +149,98 @@ def _gaps(
     return int((body & (small < 0.5)).sum()), int(body.sum())
 
 
+def _write_preview(
+    char: Character,
+    rendered: list[tuple[np.ndarray, np.ndarray]],
+    canvas: tuple[int, int],
+    frames: int,
+    strip_frames: int,
+    strip_height: int,
+    gif_height: int,
+) -> None:
+    """Записать preview.gif и preview_strip.png из готовых кадров."""
+    background = np.array(BG_COLOR, dtype=np.float32) / 255.0
+    gif_scale = min(1.0, gif_height / canvas[0])
+    gif = []
+    for rgb, acc in rendered:
+        flat = np.clip(rgb + background * (1.0 - acc[..., None]), 0, 1) * 255
+        flat = flat.astype(np.uint8)
+        if gif_scale < 1.0:
+            flat = cv2.resize(
+                flat,
+                (round(canvas[1] * gif_scale), round(canvas[0] * gif_scale)),
+                interpolation=cv2.INTER_AREA,
+            )
+        gif.append(
+            Image.fromarray(flat).convert(
+                "P", palette=Image.Palette.ADAPTIVE, colors=128
+            )
+        )
+    gif[0].save(
+        char.preview,
+        save_all=True,
+        append_images=gif[1:],
+        duration=int(1000 / frames),
+        loop=0,
+        disposal=2,
+    )
+
+    step = max(1, frames // strip_frames)
+    scale = strip_height / canvas[0]
+    tiles = []
+    for rgb, acc in rendered[::step][:strip_frames]:
+        rgba = np.dstack([np.clip(rgb, 0, 1) * 255, np.clip(acc, 0, 1) * 255])
+        tiles.append(
+            cv2.resize(
+                rgba.astype(np.uint8),
+                (max(1, round(canvas[1] * scale)), strip_height),
+                interpolation=cv2.INTER_AREA,
+            )
+        )
+    char.write_rgba(char.preview_strip, np.hstack(tiles))
+
+
+def swing_mesh(
+    char: Character,
+    rig: dict,
+    texture: np.ndarray,
+    alpha: np.ndarray,
+    frames: int = FRAMES,
+    strip_frames: int = 8,
+    strip_height: int = 320,
+    gif_height: int = 600,
+) -> dict:
+    """Стресс-свинг деформацией сетки — без нарезки на жёсткие части."""
+    from .. import mesh
+
+    width, height = rig["size"]
+    pad_x = pad_y = round(max(width, height) * PAD_RATIO)
+    canvas = (height + 2 * pad_y, width + 2 * pad_x)
+
+    unit = float(rig.get("unit", max(width, height)))
+    points, triangles = mesh.build(alpha, unit)
+    weights = mesh.skin_weights(points, rig)
+
+    rendered = []
+    for i in range(frames):
+        deltas = swing_deltas(2 * math.pi * i / frames)
+        moved = mesh.deform(points, weights, rig, solve_fk(rig, deltas))
+        frame = mesh.render(
+            texture, points, triangles, moved, canvas, (pad_x, pad_y)
+        )
+        rgb = frame[..., :3].astype(np.float32) / 255.0
+        acc = frame[..., 3].astype(np.float32) / 255.0
+        rendered.append((rgb, acc))
+
+    _write_preview(char, rendered, canvas, frames, strip_frames, strip_height,
+                   gif_height)
+    return {
+        "frames": frames,
+        "mesh_points": int(len(points)),
+        "mesh_triangles": int(len(triangles)),
+    }
+
+
 def swing(
     char: Character,
     rig: dict,
@@ -180,42 +272,9 @@ def swing(
         if gaps / max(body, 1) > worst_ratio:
             gap_px, worst_ratio, worst_frame = gaps, gaps / max(body, 1), i
 
-    background = np.array(BG_COLOR, dtype=np.float32) / 255.0
-    gif_scale = min(1.0, gif_height / canvas[0])
-    gif = []
-    for rgb, acc in rendered:
-        flat = np.clip(rgb + background * (1.0 - acc[..., None]), 0, 1) * 255
-        flat = flat.astype(np.uint8)
-        if gif_scale < 1.0:
-            flat = cv2.resize(
-                flat,
-                (round(canvas[1] * gif_scale), round(canvas[0] * gif_scale)),
-                interpolation=cv2.INTER_AREA,
-            )
-        image = Image.fromarray(flat)
-        gif.append(image.convert("P", palette=Image.Palette.ADAPTIVE, colors=128))
-    gif[0].save(
-        char.preview,
-        save_all=True,
-        append_images=gif[1:],
-        duration=int(1000 / frames),
-        loop=0,
-        disposal=2,
+    _write_preview(
+        char, rendered, canvas, frames, strip_frames, strip_height, gif_height
     )
-
-    step = max(1, frames // strip_frames)
-    picked = rendered[::step][:strip_frames]
-    scale = strip_height / canvas[0]
-    tiles = []
-    for rgb, acc in picked:
-        rgba = np.dstack([np.clip(rgb, 0, 1) * 255, np.clip(acc, 0, 1) * 255])
-        tile = cv2.resize(
-            rgba.astype(np.uint8),
-            (max(1, round(canvas[1] * scale)), strip_height),
-            interpolation=cv2.INTER_AREA,
-        )
-        tiles.append(tile)
-    char.write_rgba(char.preview_strip, np.hstack(tiles))
 
     scale = GAP_SCALE * GAP_SCALE
     return {
