@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Веса моделей — качаются скриптом, в git не кладём
+models/
+weights/
+*.ckpt
+*.safetensors
+*.onnx
+*.pth
+
+# Рабочие выходы вне персонажей
+outputs/
+.cache/
+*.log
+
+# Арт-образцы — до согласия автора на публикацию
+samples/
+
+# Локальные настройки Claude Code
+.claude/
