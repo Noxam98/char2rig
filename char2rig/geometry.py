@@ -28,6 +28,38 @@ def length_of(a: Point, b: Point) -> float:
     return float(np.hypot(b[0] - a[0], b[1] - a[1]))
 
 
+def solve_chain(
+    order: list[str],
+    parent_of: dict[str, str | None],
+    rest_start: dict[str, np.ndarray],
+    deltas: dict[str, float],
+) -> tuple[dict[str, float], dict[str, np.ndarray]]:
+    """FK по цепочке костей: (поправка угла, положение начального сустава).
+
+    Для каждой кости хранится не мировая матрица, а «поправка» — насколько
+    её угол отличается от покоя::
+
+        corr[кость] = corr[родитель] + delta[кость]
+        pos[кость]  = pos[родитель] + rot(corr[родитель]) · (rest - rest_род)
+
+    `order` должен идти родителями вперёд. Кость без родителя (или с
+    родителем, которого нет в наборе) считается корневой.
+    """
+    corr: dict[str, float] = {}
+    pos: dict[str, np.ndarray] = {}
+    for name in order:
+        parent = parent_of.get(name)
+        delta = float(deltas.get(name, 0.0))
+        if parent is None or parent not in pos:
+            corr[name], pos[name] = delta, rest_start[name]
+            continue
+        corr[name] = corr[parent] + delta
+        pos[name] = pos[parent] + rot(corr[parent]) @ (
+            rest_start[name] - rest_start[parent]
+        )
+    return corr, pos
+
+
 def pixel_grid(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
     """Сетка координат (xs, ys) для изображения shape=(h, w)."""
     h, w = shape

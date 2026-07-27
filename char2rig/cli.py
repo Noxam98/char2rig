@@ -100,12 +100,13 @@ def run_pipeline(
     images = rig.load_images(char, rig_data)
     checks = render.swing(char, rig_data, images)
     checks.update({k: v for k, v in stats.items() if k.startswith("uncovered")})
+    checks["fit_iou"] = char.status()["stages"].get("pose", {}).get("fit_iou", 1.0)
     verdict = render.triage(checks)
     char.record_checks(checks, verdict)
     say(
-        f"  свинг:    {checks['frames']} кадров, посадка "
-        f"{checks['fit_gap_ratio']:.3%}, швы {checks['seam_gap_ratio']:.3%} "
-        f"(худший кадр {checks['worst_frame']}) → {verdict}"
+        f"  свинг:    {checks['frames']} кадров, швы "
+        f"{checks['seam_gap_ratio']:.3%} (худший кадр {checks['worst_frame']}), "
+        f"посадка IoU {checks['fit_iou']:.2f} → {verdict}"
     )
     say(f"  готово:   {char.preview}")
     return checks
@@ -118,8 +119,29 @@ def cmd_demo(args: argparse.Namespace) -> int:
     template = templates.get(args.template)
     char = Character.open(args.name, args.dir)
     say(f"демо-кот {args.name} ({width}x{height}, шаблон {template.name})")
-    char.write_rgba(char.source, draw(template, (width, height)))
+    rgba, _ = draw(template, (width, height))
+    char.write_rgba(char.source, rgba)
     run_pipeline(char, template.name, use_ml=not args.no_ml)
+    return 0
+
+
+def cmd_dataset(args: argparse.Namespace) -> int:
+    from .dataset import generate
+
+    out = Path(args.out)
+    say(f"набор {args.count} персонажей → {out} (seed {args.seed})")
+    summary = generate(
+        out,
+        count=args.count,
+        seed=args.seed,
+        template_name=args.template,
+        preview=args.preview,
+        on_progress=lambda done, total: say(f"  {done}/{total}"),
+    )
+    say(
+        f"готово: {summary['count']} образцов, {summary['labels']} меток "
+        f"(0 — фон), превью {out / 'preview.png'}"
+    )
     return 0
 
 
@@ -160,11 +182,16 @@ def cmd_swing(args: argparse.Namespace) -> int:
     rig_data = char.read_json(char.rig)
     images = rig.load_images(char, rig_data)
     checks = render.swing(char, rig_data, images, frames=args.frames)
+    status = char.status()
+    checks["fit_iou"] = status["stages"].get("pose", {}).get("fit_iou", 1.0)
+    checks["uncovered_ratio"] = (
+        status["stages"].get("layers", {}).get("uncovered_ratio", 0.0)
+    )
     verdict = render.triage(checks)
     char.record_checks(checks, verdict)
     say(
-        f"свинг {args.name}: посадка {checks['fit_gap_ratio']:.3%}, "
-        f"швы {checks['seam_gap_ratio']:.3%} → {verdict}"
+        f"свинг {args.name}: швы {checks['seam_gap_ratio']:.3%}, "
+        f"посадка IoU {checks['fit_iou']:.2f} → {verdict}"
     )
     return 0
 
@@ -204,6 +231,16 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--size", default="512x768")
     demo.add_argument("--template", default=templates.DEFAULT_TEMPLATE)
     demo.set_defaults(func=cmd_demo)
+
+    dataset = sub.add_parser(
+        "dataset", parents=[common], help="сгенерировать обучающий набор"
+    )
+    dataset.add_argument("--count", type=int, default=200)
+    dataset.add_argument("--out", default="dataset")
+    dataset.add_argument("--seed", type=int, default=1)
+    dataset.add_argument("--preview", type=int, default=24)
+    dataset.add_argument("--template", default=templates.DEFAULT_TEMPLATE)
+    dataset.set_defaults(func=cmd_dataset)
 
     process = sub.add_parser(
         "process", parents=[common], help="прогнать конвейер на PNG"

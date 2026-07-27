@@ -19,7 +19,7 @@ import numpy as np
 from PIL import Image
 
 from ..character import Character
-from ..geometry import capsule_field, pixel_grid, rot
+from ..geometry import capsule_field, pixel_grid, rot, solve_chain
 
 # Стресс-свинг: амплитуда в градусах и фаза в радианах.
 # Стороны в противофазе — так шов в суставе видно на всех фазах качания.
@@ -59,20 +59,11 @@ def solve_fk(
     rig: dict, deltas: dict[str, float]
 ) -> dict[str, tuple[float, np.ndarray]]:
     """Для каждой кости: (поправка угла, позиция начального сустава)."""
-    by_name = {b["name"]: b for b in rig["bones"]}
-    out: dict[str, tuple[float, np.ndarray]] = {}
-    for bone in rig["bones"]:  # порядок «родитель раньше ребёнка» из rig.py
-        rest_a = np.array(bone["rest_a"], dtype=float)
-        parent = bone["parent"]
-        delta = float(deltas.get(bone["name"], 0.0))
-        if parent is None or parent not in out:
-            out[bone["name"]] = (delta, rest_a)
-            continue
-        corr_p, pos_p = out[parent]
-        rest_ap = np.array(by_name[parent]["rest_a"], dtype=float)
-        pos = pos_p + rot(corr_p) @ (rest_a - rest_ap)
-        out[bone["name"]] = (corr_p + delta, pos)
-    return out
+    order = [b["name"] for b in rig["bones"]]  # родители раньше детей — из rig.py
+    parent_of = {b["name"]: b["parent"] for b in rig["bones"]}
+    rest = {b["name"]: np.array(b["rest_a"], dtype=float) for b in rig["bones"]}
+    corr, pos = solve_chain(order, parent_of, rest, deltas)
+    return {name: (corr[name], pos[name]) for name in order}
 
 
 def render_frame(
@@ -229,10 +220,9 @@ def swing(
     scale = GAP_SCALE * GAP_SCALE
     return {
         "frames": frames,
-        "fit_gap_px": int(rest_gaps / scale),
-        "fit_gap_ratio": round(fit_ratio, 5),
         "seam_gap_px": int(max(gap_px - rest_gaps, 0) / scale),
         "seam_gap_ratio": round(max(worst_ratio - fit_ratio, 0.0), 5),
+        "rest_gap_ratio": round(fit_ratio, 5),
         "worst_frame": worst_frame,
     }
 
@@ -240,15 +230,23 @@ def swing(
 def triage(checks: dict) -> str:
     """Светофор автотриажа (принцип №3 в DESIGN.md).
 
-    Разные дефекты — разные пороги: щели в покое означают криво севший
-    скелет и лечатся правкой суставов, прирост щелей в движении — швы, и
-    лечится нахлёстом.
+    Три разных дефекта — три числа, каждое меряется там, где оно осмысленно:
+
+    - `seam_gap_ratio` — насколько при движении открывается тело, которого
+      не закрыл ни один слой. Это швы, лечится нахлёстом.
+    - `fit_iou` (с этапа позы) — совпадение капсул скелета с силуэтом.
+      Это посадка, лечится правкой суставов.
+    - `uncovered_ratio` — пиксели арта, не попавшие ни в одну часть.
+
+    Щели в позе покоя (`rest_gap_ratio`) в триаже не участвуют: у живого
+    арта силуэт всегда немного не совпадает с капсулами (клочья шерсти,
+    одежда), и это не дефект — потому и вычитается из щелей в движении.
     """
     seam = checks.get("seam_gap_ratio", 0.0)
-    fit = checks.get("fit_gap_ratio", 0.0)
     uncovered = checks.get("uncovered_ratio", 0.0)
-    if seam < 0.002 and fit < 0.005 and uncovered < 0.0005:
+    fit = checks.get("fit_iou", 1.0)
+    if seam < 0.002 and uncovered < 0.0005 and fit >= 0.85:
         return "green"
-    if seam < 0.01 and fit < 0.02 and uncovered < 0.005:
+    if seam < 0.01 and uncovered < 0.005 and fit >= 0.7:
         return "yellow"
     return "red"

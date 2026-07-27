@@ -228,4 +228,7 @@ def run(
         if name in joints:
             joints[name] = (joints[name][0] + delta[0], joints[name][1] + delta[1])
 
+    # итоговое совпадение с силуэтом считаем всегда: это и есть оценка
+    # качества посадки, по которой персонажа красит триаж
+    params["fit_iou"] = round(_agreement(template, joints, alpha), 3)
     return joints, method, fallback, params

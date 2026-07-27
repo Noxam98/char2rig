@@ -5,69 +5,58 @@
     "background": {
       "method": "source_alpha",
       "fallback": true,
-      "at": "2026-07-27T19:26:21+03:00"
+      "at": "2026-07-27T20:07:43+03:00"
     },
     "pose": {
       "method": "bbox_fit",
       "fallback": true,
-      "at": "2026-07-27T19:26:22+03:00",
+      "at": "2026-07-27T20:07:43+03:00",
       "bbox": [
-        39,
-        31,
-        435,
-        707
+        34,
+        27,
+        445,
+        711
       ],
-      "scale": 670.142,
-      "x_scale": 0.999,
-      "fit_iou": 0.951
+      "scale": 673.934,
+      "x_scale": 1.017,
+      "fit_iou": 0.91
     },
     "segment": {
-      "method": "sam2+capsules",
-      "fallback": false,
-      "at": "2026-07-27T19:26:33+03:00",
+      "method": "capsules",
+      "fallback": true,
+      "at": "2026-07-27T20:07:43+03:00",
       "parts": 17,
-      "sam_parts": [
-        "torso",
-        "arm_upper_r",
-        "hand_r",
-        "arm_upper_l",
-        "hand_l",
-        "shin_r",
-        "foot_r",
-        "shin_l",
-        "foot_l",
-        "tail_2"
-      ],
+      "sam_parts": [],
       "empty_parts": [],
-      "silhouette_px": 117661
+      "silhouette_px": 116807
     },
     "layers": {
-      "method": "overlap_cut+lama",
-      "fallback": false,
-      "at": "2026-07-27T19:26:38+03:00",
+      "method": "overlap_cut+nearest_fill",
+      "fallback": true,
+      "at": "2026-07-27T20:07:44+03:00",
       "layers": 17,
       "uncovered_px": 0,
       "uncovered_ratio": 0.0,
-      "ring_px": 9028,
-      "hidden_px": 618
+      "ring_px": 9130,
+      "hidden_px": 497
     },
     "rig": {
       "method": "joint_pivots",
       "fallback": false,
-      "at": "2026-07-27T19:26:38+03:00",
+      "at": "2026-07-27T20:07:44+03:00",
       "bones": 17
     }
   },
   "checks": {
     "frames": 24,
-    "fit_gap_px": 0,
-    "fit_gap_ratio": 0.0,
-    "seam_gap_px": 4,
-    "seam_gap_ratio": 4e-05,
-    "worst_frame": 14,
+    "seam_gap_px": 0,
+    "seam_gap_ratio": 0.00059,
+    "rest_gap_ratio": 0.013,
+    "worst_frame": 7,
     "uncovered_px": 0,
-    "uncovered_ratio": 0.0
+    "uncovered_ratio": 0.0,
+    "fit_iou": 0.91
   },
-  "updated": "2026-07-27T19:26:56+03:00",
+  "updated": "2026-07-27T20:07:59+03:00",
   "triage": "green"
 }

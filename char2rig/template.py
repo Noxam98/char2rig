@@ -159,6 +159,36 @@ def get(name: str) -> Template:
     return TEMPLATES[name]
 
 
+def posed_joints(
+    template: Template,
+    joints: dict[str, tuple[float, float]],
+    deltas: dict[str, float],
+) -> tuple[dict[str, tuple[float, float]], dict[str, float]]:
+    """Повернуть суставы по углам `deltas` (радианы) вокруг их суставов.
+
+    Возвращает (суставы, поправки углов по костям). Поправки нужны тем, кто
+    рисует привязанные к кости детали — морду на голове, например.
+    """
+    import numpy as np
+
+    from .geometry import rot, solve_chain
+
+    order = [b.name for b in template.ordered_bones()]
+    parent_of = {b.name: b.parent for b in template.bones}
+    rest = {b.name: np.array(joints[b.a], dtype=float) for b in template.bones}
+    corr, pos = solve_chain(order, parent_of, rest, deltas)
+
+    moved = dict(joints)
+    for bone in template.ordered_bones():
+        start = pos[bone.name]
+        end = start + rot(corr[bone.name]) @ (
+            np.array(joints[bone.b], dtype=float) - rest[bone.name]
+        )
+        moved[bone.a] = (float(start[0]), float(start[1]))
+        moved[bone.b] = (float(end[0]), float(end[1]))
+    return moved, corr
+
+
 def pixels_per_unit(
     joints: dict[str, tuple[float, float]], template: Template
 ) -> float:
