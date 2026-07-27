@@ -197,13 +197,29 @@ def cmd_swing(args: argparse.Namespace) -> int:
 
 
 def cmd_edit(args: argparse.Namespace) -> int:
-    say(
-        "редактор суставов ещё не написан (PLAN.md: появится после первого "
-        "прогона). Пока правки — руками в skeleton.overrides.json:\n"
-        '  {"joints": {"elbow_l": [12, -4]}}\n'
-        "затем `python -m char2rig recut <имя> --stage pose`."
-    )
-    return 1
+    import webbrowser
+
+    from .editor import serve, url
+
+    char = Character.open(args.name, args.dir)
+    if not _require(char, char.skeleton, f"`char2rig process <png> --name {args.name}`"):
+        return 1
+
+    server = serve(char, args.port)
+    address = url(server)
+    say(f"редактор суставов: {address}")
+    say("тяни суставы мышкой, жми «Сохранить правки», потом:")
+    say(f"  python -m char2rig recut {args.name} --stage pose")
+    say("остановить — Ctrl+C")
+    if not args.no_browser:
+        webbrowser.open(address)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        say("редактор остановлен")
+    finally:
+        server.server_close()
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -265,9 +281,11 @@ def build_parser() -> argparse.ArgumentParser:
     swing.set_defaults(func=cmd_swing)
 
     edit = sub.add_parser(
-        "edit", parents=[common], help="правка суставов (пока вручную)"
+        "edit", parents=[common], help="правка суставов мышкой в браузере"
     )
     edit.add_argument("name")
+    edit.add_argument("--port", type=int, default=8765)
+    edit.add_argument("--no-browser", action="store_true")
     edit.set_defaults(func=cmd_edit)
     return parser
 

@@ -39,8 +39,20 @@ python -m venv .venv
 
 ```bash
 .venv/bin/python -m char2rig process путь/к/арту.png --name barsik
-.venv/bin/python -m char2rig recut barsik --stage segment   # пересчёт с этапа
+.venv/bin/python -m char2rig edit barsik                    # подвинуть суставы
+.venv/bin/python -m char2rig recut barsik --stage pose      # пересчёт с этапа
 .venv/bin/python -m char2rig swing barsik                   # только превью
+```
+
+`edit` поднимает локальную страницу, где суставы двигаются мышкой. Правки
+пишутся дельтами в `skeleton.overrides.json` и переприменяются при каждом
+пересчёте — перегенерация арта их не стирает.
+
+Свой обучающий набор с точной разметкой частей (карта «пиксель → кость» и
+координаты суставов):
+
+```bash
+.venv/bin/python -m char2rig dataset --count 1000 --out dataset
 ```
 
 Нейро-этапы (rembg, DWPose, SAM2, LaMa) подключаются доустановкой

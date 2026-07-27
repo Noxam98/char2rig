@@ -5,12 +5,12 @@
     "background": {
       "method": "source_alpha",
       "fallback": true,
-      "at": "2026-07-27T20:39:22+03:00"
+      "at": "2026-07-27T21:09:36+03:00"
     },
     "pose": {
       "method": "bbox_fit",
       "fallback": true,
-      "at": "2026-07-27T20:39:29+03:00",
+      "at": "2026-07-27T21:09:43+03:00",
       "bbox": [
         34,
         27,
@@ -30,7 +30,7 @@
     "segment": {
       "method": "sam2+capsules",
       "fallback": false,
-      "at": "2026-07-27T20:39:36+03:00",
+      "at": "2026-07-27T21:09:49+03:00",
       "parts": 17,
       "sam_parts": [
         "arm_upper_r",
@@ -49,7 +49,7 @@
     "layers": {
       "method": "overlap_cut+lama",
       "fallback": false,
-      "at": "2026-07-27T20:39:41+03:00",
+      "at": "2026-07-27T21:09:55+03:00",
       "layers": 17,
       "uncovered_px": 0,
       "uncovered_ratio": 0.0,
@@ -59,7 +59,7 @@
     "rig": {
       "method": "joint_pivots",
       "fallback": false,
-      "at": "2026-07-27T20:39:41+03:00",
+      "at": "2026-07-27T21:09:55+03:00",
       "bones": 17
     }
   },
@@ -73,6 +73,6 @@
     "uncovered_ratio": 0.0,
     "fit_iou": 0.91
   },
-  "updated": "2026-07-27T20:39:59+03:00",
+  "updated": "2026-07-27T21:10:13+03:00",
   "triage": "green"
 }
