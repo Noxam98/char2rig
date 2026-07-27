@@ -1,0 +1,10 @@
+# Нейро-слой. Ставится поверх requirements.txt только на машине с GPU.
+# torch ставится отдельно (Pascal sm_61 живёт в torch <= 2.7.x):
+#   pip install "torch<2.8" --index-url https://download.pytorch.org/whl/cu126
+-r requirements.txt
+
+rembg>=2.0              # удаление фона (u2net / BiRefNet)
+rtmlib>=0.0.13          # DWPose поверх onnxruntime
+onnxruntime-gpu>=1.17   # на машине без GPU — onnxruntime
+ultralytics>=8.3        # SAM2 (sam2_b.pt)
+simple-lama-inpainting>=0.1.2  # LaMa для достройки скрытых областей

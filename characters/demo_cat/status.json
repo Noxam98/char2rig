@@ -1,0 +1,57 @@
+{
+  "name": "demo_cat",
+  "created": "2026-07-27T18:12:41+03:00",
+  "stages": {
+    "background": {
+      "method": "source_alpha",
+      "fallback": true,
+      "at": "2026-07-27T18:26:52+03:00"
+    },
+    "pose": {
+      "method": "bbox_fit",
+      "fallback": true,
+      "at": "2026-07-27T18:26:52+03:00",
+      "bbox": [
+        39,
+        31,
+        435,
+        707
+      ],
+      "scale": 670.142,
+      "x_scale": 0.999
+    },
+    "segment": {
+      "method": "capsules",
+      "fallback": true,
+      "at": "2026-07-27T18:26:52+03:00",
+      "parts": 17,
+      "empty_parts": [],
+      "silhouette_px": 117661
+    },
+    "layers": {
+      "method": "overlap_cut+nearest_fill",
+      "fallback": true,
+      "at": "2026-07-27T18:26:53+03:00",
+      "layers": 17,
+      "uncovered_px": 0,
+      "uncovered_ratio": 0.0,
+      "inpainted_px": 8722
+    },
+    "rig": {
+      "method": "joint_pivots",
+      "fallback": false,
+      "at": "2026-07-27T18:26:53+03:00",
+      "bones": 17
+    }
+  },
+  "checks": {
+    "frames": 24,
+    "gap_px": 4,
+    "gap_ratio": 4e-05,
+    "worst_frame": 14,
+    "uncovered_px": 0,
+    "uncovered_ratio": 0.0
+  },
+  "updated": "2026-07-27T18:27:09+03:00",
+  "triage": "green"
+}

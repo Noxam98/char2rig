@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "char2rig"
+version = "0.1.0"
+description = "Конвейер: картинка персонажа → нарезка на части → риг → анимация"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pillow>=10.0",
+    "opencv-python-headless>=4.9",
+]
+
+[project.optional-dependencies]
+ml = [
+    "rembg>=2.0",
+    "rtmlib>=0.0.13",
+    "onnxruntime>=1.17",
+    "ultralytics>=8.3",
+    "simple-lama-inpainting>=0.1.2",
+]
+
+[project.scripts]
+char2rig = "char2rig.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["char2rig*"]
