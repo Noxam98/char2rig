@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from . import note_fallback
+from .. import models_dir
 from ..geometry import capsule_field, pixel_grid
 from ..template import Template, pixels_per_unit
 
@@ -78,7 +79,7 @@ SAM_MIN_IOU = 0.5  # и насколько обязана совпасть с т
 
 # веса кладём в models/ (в .gitignore): ultralytics по умолчанию сыплет их
 # в текущую папку, а 154 МБ в корне репы GitHub не принимает
-SAM_WEIGHTS = Path("models/sam2_b.pt")
+SAM_WEIGHTS = models_dir() / "sam2_b.pt"
 
 
 def _try_sam2(

@@ -32,6 +32,24 @@ _COCO_TO_TEMPLATE = {
 
 X_SCALE_LIMITS = (0.75, 1.35)
 
+# порядок «родитель раньше ребёнка»: сустав тянет за собой свою цепочку,
+# и плечо должно встать на место до того, как поедет локоть
+SNAP_ORDER: tuple[tuple[int, str], ...] = (
+    (5, "shoulder_l"),
+    (6, "shoulder_r"),
+    (11, "hip_l"),
+    (12, "hip_r"),
+    (7, "elbow_l"),
+    (8, "elbow_r"),
+    (13, "knee_l"),
+    (14, "knee_r"),
+    (9, "wrist_l"),
+    (10, "wrist_r"),
+    (15, "hock_l"),  # у COCO лодыжка, у digitigrade-ноги это скакательный сустав
+    (16, "hock_r"),
+)
+SNAP_MIN_SCORE = 0.4
+
 
 def _solve_x_scale(template: Template, target_width: float) -> float:
     """Растяжение шаблона по ширине под относительную ширину силуэта.
@@ -85,10 +103,32 @@ def fit_bbox(template: Template, alpha: np.ndarray) -> tuple[dict, dict]:
     return joints, params
 
 
+def _try_drawn_pose(
+    rgb: np.ndarray, alpha: np.ndarray
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Оценщик позы Meta, дообученный на рисунках. bbox берём из силуэта.
+
+    Свой детектор персонажа у них тоже есть, но нам он не нужен: силуэт уже
+    посчитан, и его рамка точнее любого детектора.
+    """
+    from ..drawnpose import estimate
+
+    try:
+        result = estimate(rgb, bbox_of(alpha))
+    except Exception as exc:
+        note_fallback("скелет", f"drawn_pose упал: {type(exc).__name__}: {exc}")
+        return None
+    if result is None:
+        note_fallback("скелет", "нет весов models/drawn_pose_resnet50.pth")
+    return result
+
+
 _POSE_MODEL = None
 
 
-def _try_dwpose(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+def _try_dwpose(
+    rgb: np.ndarray, alpha: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray] | None:
     """(keypoints[17,2], scores[17]) от RTMPose или None, если недоступно.
 
     Берём `Body`, а не `Wholebody`: лицо и пальцы нам не нужны, а модель
@@ -146,6 +186,49 @@ def _similarity_to(
 FIT_SCALE = 0.4  # совпадение с силуэтом считаем в уменьшенном разрешении
 
 
+def _subtree(template: Template, joint: str) -> set[str]:
+    """Суставы, которые едут вместе с этим: он сам и вся цепочка ниже."""
+    moving = {joint}
+    growing = True
+    while growing:
+        growing = False
+        for bone in template.bones:
+            if bone.a in moving and bone.b not in moving:
+                moving.add(bone.b)
+                growing = True
+    return moving
+
+
+def _snap_joints(
+    template: Template,
+    joints: dict[str, tuple[float, float]],
+    keypoints: np.ndarray,
+    scores: np.ndarray,
+) -> dict[str, tuple[float, float]] | None:
+    """Посадить найденные суставы точно, утащив за каждым его цепочку.
+
+    Подгонка подобием двигает скелет целиком и потому бессильна, когда у
+    персонажа другие пропорции — а именно их детектор и меряет. Здесь
+    каждый найденный сустав встаёт на своё место, а его потомки едут следом,
+    так что длины костей подстраиваются под конкретного персонажа.
+    """
+    moved = dict(joints)
+    snapped = 0
+    for index, name in SNAP_ORDER:
+        if index >= len(scores) or scores[index] < SNAP_MIN_SCORE:
+            continue
+        if name not in moved:
+            continue
+        target = keypoints[index]
+        dx = float(target[0]) - moved[name][0]
+        dy = float(target[1]) - moved[name][1]
+        for joint in _subtree(template, name):
+            x, y = moved[joint]
+            moved[joint] = (x + dx, y + dy)
+        snapped += 1
+    return moved if snapped >= 4 else None
+
+
 def _agreement(
     template: Template, joints: dict[str, tuple[float, float]], alpha: np.ndarray
 ) -> float:
@@ -194,34 +277,41 @@ def run(
     method, fallback = "bbox_fit", True
 
     if use_ml:
-        detected = _try_dwpose(rgba[..., :3])
-        if detected is not None:
+        # Детекторы обучены на других доменах — на антропоморфе любой из них
+        # может уехать. Поэтому не верим ни одному на слово: каждый даёт
+        # кандидата, а выбирает силуэт (торчащая наружу капсула потом
+        # вылезает щелями). Посадка по bbox участвует наравне с моделями.
+        best = _agreement(template, joints, alpha)
+        scores = {"bbox_fit": round(best, 3)}
+        for name, detector in (
+            ("dwpose", _try_dwpose),
+            ("drawn_pose", _try_drawn_pose),
+        ):
+            detected = detector(rgba[..., :3], alpha)
+            if detected is None:
+                continue
+            variants: dict[str, dict[str, tuple[float, float]]] = {}
             fitted = _similarity_to(joints, *detected)
-            if fitted is None:
-                note_fallback("скелет", "мало уверенных ключевых точек")
-            else:
+            if fitted is not None:
                 scale, (dx, dy) = fitted
-                moved = {
-                    name: (x * scale + dx, y * scale + dy)
-                    for name, (x, y) in joints.items()
+                variants[f"{name}_similarity"] = {
+                    key: (x * scale + dx, y * scale + dy)
+                    for key, (x, y) in joints.items()
                 }
-                # детектор обучен на людях: на антропоморфе он может уехать
-                # куда угодно. Берём ту посадку, которая лучше совпала с
-                # силуэтом — торчащая наружу капсула потом вылезает щелями
-                before = _agreement(template, joints, alpha)
-                after = _agreement(template, moved, alpha)
-                params["fit_iou"] = round(max(before, after), 3)
-                if after <= before:
-                    note_fallback(
-                        "скелет",
-                        f"DWPose сел хуже посадки по bbox (IoU {after:.2f} "
-                        f"против {before:.2f})",
-                    )
-                else:
-                    joints = moved
-                    params["dwpose_scale"] = round(scale, 3)
-                    params["dwpose_conf"] = round(float(np.mean(detected[1])), 3)
-                    method, fallback = "bbox_fit+dwpose", False
+            snapped = _snap_joints(template, joints, *detected)
+            if snapped is not None:
+                variants[f"{name}_snap"] = snapped
+            if not variants:
+                note_fallback("скелет", f"{name}: мало уверенных точек")
+                continue
+            for label, moved in variants.items():
+                score = _agreement(template, moved, alpha)
+                scores[label] = round(score, 3)
+                if score > best:
+                    joints, best = moved, score
+                    method, fallback = f"bbox_fit+{label}", False
+                    params["pose_conf"] = round(float(np.mean(detected[1])), 3)
+        params["candidates"] = scores
 
     # принцип №1: ручные правки — оверлеи поверх автоматики
     for name, delta in (overrides or {}).get("joints", {}).items():

@@ -13,6 +13,12 @@
     ],
     "scale": 673.934,
     "x_scale": 1.017,
+    "candidates": {
+      "bbox_fit": 0.91,
+      "dwpose_similarity": 0.737,
+      "dwpose_snap": 0.841,
+      "drawn_pose_snap": 0.825
+    },
     "fit_iou": 0.91
   },
   "joints": {

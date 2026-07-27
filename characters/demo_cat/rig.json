@@ -193,7 +193,7 @@
       "z": 22,
       "image": "layers/arm_upper_r.png",
       "offset": [
-        116,
+        109,
         203
       ],
       "pivot": [
@@ -523,7 +523,7 @@
       "z": 28,
       "image": "layers/hand_l.png",
       "offset": [
-        398,
+        397,
         385
       ],
       "pivot": [

@@ -5,12 +5,12 @@
     "background": {
       "method": "source_alpha",
       "fallback": true,
-      "at": "2026-07-27T20:13:17+03:00"
+      "at": "2026-07-27T20:39:22+03:00"
     },
     "pose": {
       "method": "bbox_fit",
       "fallback": true,
-      "at": "2026-07-27T20:13:17+03:00",
+      "at": "2026-07-27T20:39:29+03:00",
       "bbox": [
         34,
         27,
@@ -19,31 +19,47 @@
       ],
       "scale": 673.934,
       "x_scale": 1.017,
+      "candidates": {
+        "bbox_fit": 0.91,
+        "dwpose_similarity": 0.737,
+        "dwpose_snap": 0.841,
+        "drawn_pose_snap": 0.825
+      },
       "fit_iou": 0.91
     },
     "segment": {
-      "method": "capsules",
-      "fallback": true,
-      "at": "2026-07-27T20:13:17+03:00",
+      "method": "sam2+capsules",
+      "fallback": false,
+      "at": "2026-07-27T20:39:36+03:00",
       "parts": 17,
-      "sam_parts": [],
+      "sam_parts": [
+        "arm_upper_r",
+        "hand_r",
+        "arm_upper_l",
+        "arm_fore_l",
+        "hand_l",
+        "shin_r",
+        "foot_r",
+        "shin_l",
+        "foot_l"
+      ],
       "empty_parts": [],
       "silhouette_px": 116807
     },
     "layers": {
-      "method": "overlap_cut+nearest_fill",
-      "fallback": true,
-      "at": "2026-07-27T20:13:18+03:00",
+      "method": "overlap_cut+lama",
+      "fallback": false,
+      "at": "2026-07-27T20:39:41+03:00",
       "layers": 17,
       "uncovered_px": 0,
       "uncovered_ratio": 0.0,
-      "ring_px": 9386,
+      "ring_px": 9465,
       "hidden_px": 2114
     },
     "rig": {
       "method": "joint_pivots",
       "fallback": false,
-      "at": "2026-07-27T20:13:18+03:00",
+      "at": "2026-07-27T20:39:41+03:00",
       "bones": 17
     }
   },
@@ -57,6 +73,6 @@
     "uncovered_ratio": 0.0,
     "fit_iou": 0.91
   },
-  "updated": "2026-07-27T20:13:33+03:00",
+  "updated": "2026-07-27T20:39:59+03:00",
   "triage": "green"
 }
