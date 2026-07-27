@@ -133,8 +133,8 @@
       "z": 20,
       "image": "layers/torso.png",
       "offset": [
-        168,
-        163
+        167,
+        166
       ],
       "pivot": [
         256.5,
@@ -223,7 +223,7 @@
       "z": 26,
       "image": "layers/arm_upper_l.png",
       "offset": [
-        280,
+        271,
         205
       ],
       "pivot": [
@@ -253,7 +253,7 @@
       "z": 8,
       "image": "layers/thigh_r.png",
       "offset": [
-        136,
+        137,
         375
       ],
       "pivot": [
@@ -283,7 +283,7 @@
       "z": 12,
       "image": "layers/thigh_l.png",
       "offset": [
-        254,
+        260,
         375
       ],
       "pivot": [
@@ -313,7 +313,7 @@
       "z": -2,
       "image": "layers/tail_1.png",
       "offset": [
-        119,
+        117,
         446
       ],
       "pivot": [
@@ -344,7 +344,7 @@
       "image": "layers/arm_fore_r.png",
       "offset": [
         62,
-        313
+        303
       ],
       "pivot": [
         136.04,
@@ -373,8 +373,8 @@
       "z": 27,
       "image": "layers/arm_fore_l.png",
       "offset": [
-        347,
-        313
+        341,
+        303
       ],
       "pivot": [
         376.96,
@@ -404,7 +404,7 @@
       "image": "layers/shin_r.png",
       "offset": [
         147,
-        497
+        473
       ],
       "pivot": [
         189.58,
@@ -434,7 +434,7 @@
       "image": "layers/shin_l.png",
       "offset": [
         276,
-        496
+        473
       ],
       "pivot": [
         323.42,
@@ -494,7 +494,7 @@
       "image": "layers/hand_r.png",
       "offset": [
         37,
-        390
+        387
       ],
       "pivot": [
         85.85,
@@ -523,8 +523,8 @@
       "z": 28,
       "image": "layers/hand_l.png",
       "offset": [
-        396,
-        390
+        395,
+        387
       ],
       "pivot": [
         427.15,
@@ -554,7 +554,7 @@
       "image": "layers/foot_r.png",
       "offset": [
         168,
-        587
+        575
       ],
       "pivot": [
         213.0,
@@ -584,7 +584,7 @@
       "image": "layers/foot_l.png",
       "offset": [
         276,
-        587
+        575
       ],
       "pivot": [
         300.0,
