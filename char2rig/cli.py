@@ -79,6 +79,25 @@ def load_parts_overrides(char: Character, template: templates.Template):
     return segment.remap_overrides(painted, legend.get("parts", []), template), False
 
 
+def load_redraw_overrides(char: Character, template: templates.Template):
+    """Мазки по достройке с диска: (маска на часть, устарели ли).
+
+    Мазок помнит не пиксели, а границу области, которую отдают модели, — но
+    нарисован он по конкретному арту, и на новом ничего не значит.
+    """
+    if not char.redraw_legend.exists():
+        return None, False
+    legend = char.read_json(char.redraw_legend)
+    if legend.get("source") not in ("", char.source_digest()):
+        return None, True
+    strokes = {}
+    for bone in template.bones:
+        path = char.redraw_dir / f"{bone.name}.png"
+        if path.exists():
+            strokes[bone.name] = char.read_mask(path)
+    return strokes or None, False
+
+
 def run_pipeline(
     char: Character,
     template_name: str,
@@ -178,13 +197,17 @@ def run_pipeline(
         }
 
     if _from(start, "layers"):
+        redraw, stale_redraw = load_redraw_overrides(char, template)
+        if stale_redraw:
+            say("  ! достройка правилась под другой арт — правка не применена")
         cut, method, fallback, stats = layers.run(
-            template, rgba, alpha, joints, masks, unit, radii, use_ml
+            template, rgba, alpha, joints, masks, unit, radii, use_ml, redraw
         )
-        char.record_stage("layers", method, fallback, **stats)
+        char.record_stage("layers", method, fallback, redraw_stale=stale_redraw, **stats)
+        by_hand = f", правок {stats['redraw_px']} px" if stats["redraw_px"] else ""
         say(
             f"  слои:     {stats['layers']} шт ({method}), непокрытых пикселей "
-            f"{stats['uncovered_px']}, скрытых {stats['hidden_px']}"
+            f"{stats['uncovered_px']}, скрытых {stats['hidden_px']}{by_hand}"
         )
         rig_data = rig.run(
             char, template, joints, cut, (width, height), unit, radii

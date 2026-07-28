@@ -104,6 +104,72 @@ def _save_strokes(character: Character, data_url: str | None) -> int:
     return int((grey > 64).sum())
 
 
+def fill_codes(
+    character: Character, template: templates.Template, name: str
+) -> np.ndarray:
+    """Что в слое части настоящее, а что выдумано.
+
+    0 — часть сюда не достаёт, 1 — родные пиксели, 2 — кайма за силуэтом
+    (дорисована ближайшим пикселем), 3 — область под чужой частью (её
+    достраивает LaMa). Считается тем же кодом, что и сама нарезка, — иначе
+    человек правил бы не то, что попадёт в слой.
+    """
+    from .stages import layers
+
+    alpha = character.read_mask(character.silhouette)
+    skeleton = character.read_json(character.skeleton)
+    joints = {k: (v[0], v[1]) for k, v in skeleton["joints"].items()}
+    radii = {k: (v[0], v[1]) for k, v in skeleton.get("radii", {}).items()} or None
+    masks = {
+        path.stem: character.read_mask(path)
+        for path in sorted(character.masks_dir.glob("*.png"))
+    }
+    bone = template.bone(name)
+    if bone.name not in masks:
+        return np.zeros(alpha.shape, dtype=np.uint8)
+    unit = templates.pixels_per_unit(joints, template)
+    fill = layers.part_fill(template, bone, alpha, joints, masks, unit, radii)
+    codes = np.zeros(alpha.shape, dtype=np.uint8)
+    if fill is None:
+        return codes
+    codes[fill["region"]] = 1
+    codes[fill["ring"]] = 2
+    codes[fill["hidden"]] = 3
+    return codes
+
+
+def _save_redraw(
+    character: Character, template: templates.Template, data: dict | None
+) -> int:
+    """Сохранить мазки по достройке. Вернуть число закрашенных пикселей."""
+    if not isinstance(data, dict):
+        return 0
+    known = {bone.name for bone in template.bones}
+    total = 0
+    for name, data_url in data.items():
+        if name not in known:
+            continue
+        painted = _decode(data_url)
+        if painted is None:
+            continue
+        path = character.redraw_dir / f"{name}.png"
+        grey = painted[..., 0].astype(np.uint8)
+        grey[painted[..., 3] < 128] = 0
+        if not (grey > 64).any():
+            path.unlink(missing_ok=True)
+            continue
+        character.write_mask(path, grey)
+        total += int((grey > 64).sum())
+    left = sorted(character.redraw_dir.glob("*.png")) if character.redraw_dir.exists() else []
+    if left:
+        character.write_json(
+            character.redraw_legend, {"source": character.source_digest()}
+        )
+    else:
+        character.redraw_legend.unlink(missing_ok=True)
+    return total
+
+
 def _save_parts(
     character: Character, template: templates.Template, data_url: str | None
 ) -> int:
@@ -198,6 +264,79 @@ class _Handler(BaseHTTPRequestHandler):
         owner = owner_map(self.character, _template_of(self.character))
         self._send(200, owner.tobytes(), BINARY)
 
+    def _part_arg(self, template: templates.Template) -> str | None:
+        """?part=<имя> из адреса, если такая кость в шаблоне есть."""
+        from urllib.parse import parse_qs, urlparse
+
+        wanted = parse_qs(urlparse(self.path).query).get("part", [""])[0]
+        return wanted if any(b.name == wanted for b in template.bones) else None
+
+    def _get_fill(self) -> None:
+        character = self.character
+        template = _template_of(character)
+        height, width = character.read_mask(character.silhouette).shape
+        colors = palette(len(template.bones))
+        status = character.status()
+        self._json(
+            {
+                "size": [int(width), int(height)],
+                "method": status.get("stages", {}).get("layers", {}).get("method", "?"),
+                "parts": [
+                    {
+                        "name": bone.name,
+                        "color": colors[index],
+                        "edited": (character.redraw_dir / f"{bone.name}.png").exists(),
+                    }
+                    for index, bone in enumerate(template.bones)
+                ],
+            }
+        )
+
+    def _get_fill_bin(self) -> None:
+        template = _template_of(self.character)
+        name = self._part_arg(template)
+        if name is None:
+            return self._send(404, b"no such part", "text/plain")
+        self._send(200, fill_codes(self.character, template, name).tobytes(), BINARY)
+
+    def _get_redraw_bin(self) -> None:
+        """Сохранённые мазки по одной части (пусто, если их нет или устарели)."""
+        from .cli import load_redraw_overrides
+
+        character = self.character
+        template = _template_of(character)
+        name = self._part_arg(template)
+        if name is None:
+            return self._send(404, b"no such part", "text/plain")
+        shape = character.read_mask(character.silhouette).shape
+        strokes, _stale = load_redraw_overrides(character, template)
+        painted = (strokes or {}).get(name)
+        if painted is None or painted.shape != shape:
+            painted = np.zeros(shape, dtype=np.uint8)
+        self._send(200, painted.astype(np.uint8).tobytes(), BINARY)
+
+    def _get_layer(self) -> None:
+        """Слой части, вложенный обратно в полный кадр — так он совпадает с артом."""
+        import io
+
+        from PIL import Image
+
+        character = self.character
+        template = _template_of(character)
+        name = self._part_arg(template)
+        rig = character.read_json(character.rig)
+        bone = next((b for b in rig["bones"] if b["name"] == name), None)
+        if bone is None:
+            return self._send(404, b"no such layer", "text/plain")
+        crop = character.read_rgba(character.root / bone["image"])
+        width, height = rig["size"]
+        canvas = np.zeros((height, width, 4), dtype=np.uint8)
+        x0, y0 = int(bone["offset"][0]), int(bone["offset"][1])
+        canvas[y0 : y0 + crop.shape[0], x0 : x0 + crop.shape[1]] = crop
+        buffer = io.BytesIO()
+        Image.fromarray(canvas, "RGBA").save(buffer, "PNG")
+        self._send(200, buffer.getvalue(), CONTENT_TYPES[".png"])
+
     def _get_parts_overrides(self) -> None:
         """Сохранённая карта правок в номерах текущего шаблона."""
         from .cli import load_parts_overrides
@@ -218,6 +357,10 @@ class _Handler(BaseHTTPRequestHandler):
             "parts.json": self._get_parts,
             "parts.bin": self._get_parts_bin,
             "parts.overrides.bin": self._get_parts_overrides,
+            "fill.json": self._get_fill,
+            "fill.bin": self._get_fill_bin,
+            "redraw.bin": self._get_redraw_bin,
+            "layer.png": self._get_layer,
         }
         if path in ("", "index.html"):
             page = PAGE_FILE.read_text(encoding="utf-8").replace(
@@ -259,9 +402,15 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(400, body, "text/plain; charset=utf-8")
 
         template = _template_of(self.character)
-        self.character.write_json(self.character.skeleton_overrides, overrides)
+        # пустая правка — это снятая правка, а не файл с пустыми словарями:
+        # иначе в папке персонажа заводится оверлей, которого человек не делал
+        if overrides["joints"] or overrides["radius_scale"]:
+            self.character.write_json(self.character.skeleton_overrides, overrides)
+        else:
+            self.character.skeleton_overrides.unlink(missing_ok=True)
         painted = _save_strokes(self.character, payload.get("strokes"))
         moved = _save_parts(self.character, template, payload.get("parts"))
+        redrawn = _save_redraw(self.character, template, payload.get("redraw"))
         points = payload.get("contour")
         if isinstance(points, list) and len(points) >= 3:
             # вместе с контуром пишем хеш арта: если картинку перегенерят,
@@ -277,7 +426,8 @@ class _Handler(BaseHTTPRequestHandler):
             f"  сохранено: суставов {len(overrides['joints'])}, "
             f"толщин {len(overrides['radius_scale'])}"
             + (f", мазков {painted} px" if painted else "")
-            + (f", частей {moved} px" if moved else ""),
+            + (f", частей {moved} px" if moved else "")
+            + (f", достройки {redrawn} px" if redrawn else ""),
             flush=True,
         )
         if action == "save":

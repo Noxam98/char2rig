@@ -20,6 +20,10 @@
 восстановить нечем, и её достраивает LaMa; без модели там остаются
 исходные пиксели чужой части. Узкая кайма за силуэтом всегда достраивается
 ближайшим пикселем, чтобы при отведении конечности не выглядывал фон.
+
+Границу отданной модели области можно двигать руками — мазками из редактора
+(`layers.overrides/<часть>.png`): 255 — «дорисуй здесь заново», 128 —
+«оставь как есть».
 """
 
 from __future__ import annotations
@@ -141,6 +145,84 @@ def _fill_outside(rgb: np.ndarray, unknown: np.ndarray) -> np.ndarray:
     return np.where(unknown[..., None], filled, rgb).astype(np.uint8)
 
 
+def extended_silhouette(alpha: np.ndarray) -> np.ndarray:
+    """Альфа силуэта плюс узкая кайма за его краем."""
+    silhouette = alpha > 16
+    soft = alpha.astype(np.float32) / 255.0
+    dist_out = cv2.distanceTransform((~silhouette).astype(np.uint8), cv2.DIST_L2, 3)
+    return np.maximum(soft, np.clip(1.0 - dist_out / RING_PX, 0.0, 1.0))
+
+
+def part_fill(
+    template: Template,
+    bone: Bone,
+    alpha: np.ndarray,
+    joints: dict[str, tuple[float, float]],
+    masks: dict[str, np.ndarray],
+    unit: float,
+    radii: dict[str, tuple[float, float]] | None = None,
+    grid: tuple[np.ndarray, np.ndarray] | None = None,
+    silhouette_ext: np.ndarray | None = None,
+) -> dict | None:
+    """Где лежит часть и какие её пиксели придётся выдумать.
+
+    Возвращает ``{"alpha", "region", "ring", "hidden"}`` либо None, если
+    части нет вовсе. Отсюда же берёт данные редактор достройки: считать
+    выдуманные пиксели двумя разными кусками кода — верный способ показать
+    человеку не то, что попадёт в слой.
+    """
+    shape = alpha.shape
+    own = masks[bone.name] > 127
+    if not own.any():
+        return None
+    if grid is None:
+        grid = pixel_grid(shape)
+    if silhouette_ext is None:
+        silhouette_ext = extended_silhouette(alpha)
+
+    overlap = _overlap_map(
+        shape,
+        _connection_points(template, bone, joints, unit, radii),
+        _overlap_px(bone, unit, own),
+        grid,
+    )
+    feather = max(2.0, 0.005 * unit)
+    dist_own = cv2.distanceTransform((~own).astype(np.uint8), cv2.DIST_L2, 3)
+    falloff = np.clip((overlap + feather - dist_own) / feather, 0.0, 1.0)
+    part_alpha = falloff * silhouette_ext
+    region = part_alpha > 1e-3
+    if not region.any():
+        return None
+
+    # область, закрытую чужой частью спереди, честно достроить нечем —
+    # там лежат её пиксели, а не наши; отдаём LaMa, если она есть
+    covers = [masks[name] > 127 for name in _occluders(template, bone)]
+    hidden = region & np.logical_or.reduce(covers or [np.zeros(shape, dtype=bool)])
+    return {
+        "alpha": part_alpha,
+        "region": region,
+        "ring": region & ~(alpha > 16),
+        "hidden": hidden,
+    }
+
+
+def _apply_redraw(
+    hidden: np.ndarray, region: np.ndarray, strokes: np.ndarray | None
+) -> np.ndarray:
+    """Ручная правка достройки: 255 — дорисовать заново, 128 — не трогать.
+
+    Смотреть на достроенное человеку проще, чем эвристике: LaMa то размажет
+    полосу, то, наоборот, зря сотрёт годные пиксели соседа. Мазок только
+    двигает границу области, которую отдают модели, — сами пиксели никто
+    руками не рисует (принцип №1 в DESIGN.md).
+    """
+    if strokes is None:
+        return hidden
+    again = (strokes > 200) & region
+    keep = (strokes > 64) & (strokes <= 200)
+    return (hidden | again) & ~keep
+
+
 def run(
     template: Template,
     rgba: np.ndarray,
@@ -150,56 +232,42 @@ def run(
     unit: float,
     radii: dict[str, tuple[float, float]] | None = None,
     use_ml: bool = True,
+    redraw: dict[str, np.ndarray] | None = None,
 ) -> tuple[dict[str, dict], str, bool, dict]:
     """Вернуть (слои, метод, фоллбек ли, статистика).
 
     Слой: {"image": RGBA-кроп, "offset": (x0, y0)}.
+    `redraw` — ручные мазки по достройке, по маске на часть.
     """
     shape = alpha.shape
     grid = pixel_grid(shape)
     silhouette = alpha > 16
-    soft = alpha.astype(np.float32) / 255.0
-
-    dist_out = cv2.distanceTransform(
-        (~silhouette).astype(np.uint8), cv2.DIST_L2, 3
-    )
-    silhouette_ext = np.maximum(soft, np.clip(1.0 - dist_out / RING_PX, 0.0, 1.0))
+    silhouette_ext = extended_silhouette(alpha)
 
     rgb = np.ascontiguousarray(rgba[..., :3])
     coverage = np.zeros(shape, dtype=bool)
     layers: dict[str, dict] = {}
     filled_px = 0
     hidden_px = 0
+    redraw_px = 0
     lama_used = False
 
     for bone in template.bones:
-        own = masks[bone.name] > 127
-        if not own.any():
-            continue
-        overlap = _overlap_map(
-            shape,
-            _connection_points(template, bone, joints, unit, radii),
-            _overlap_px(bone, unit, own),
-            grid,
+        fill = part_fill(
+            template, bone, alpha, joints, masks, unit, radii, grid, silhouette_ext
         )
-        feather = max(2.0, 0.005 * unit)
-        dist_own = cv2.distanceTransform((~own).astype(np.uint8), cv2.DIST_L2, 3)
-        falloff = np.clip((overlap + feather - dist_own) / feather, 0.0, 1.0)
-        part_alpha = falloff * silhouette_ext
-        region = part_alpha > 1e-3
-        if not region.any():
+        if fill is None:
             continue
+        own = masks[bone.name] > 127
+        part_alpha, region = fill["alpha"], fill["region"]
 
-        unknown = region & ~silhouette
+        unknown = fill["ring"]
         filled_px += int(unknown.sum())
         part_rgb = _fill_outside(rgb, unknown) if unknown.any() else rgb
 
-        # область, закрытую чужой частью спереди, честно достроить нечем —
-        # там лежат её пиксели, а не наши; отдаём LaMa, если она есть
-        covers = [masks[o] > 127 for o in _occluders(template, bone)]
-        hidden = region & np.logical_or.reduce(
-            covers or [np.zeros(shape, dtype=bool)]
-        )
+        strokes = (redraw or {}).get(bone.name)
+        hidden = _apply_redraw(fill["hidden"], region, strokes)
+        redraw_px += int((hidden != fill["hidden"]).sum())
         hidden_px += int(hidden.sum())
         if use_ml and hidden.any():
             restored = _try_lama(part_rgb, hidden)
@@ -224,6 +292,7 @@ def run(
         "uncovered_ratio": round(uncovered / max(int(silhouette.sum()), 1), 5),
         "ring_px": filled_px,
         "hidden_px": hidden_px,
+        "redraw_px": redraw_px,
     }
     method = "overlap_cut+lama" if lama_used else "overlap_cut+nearest_fill"
     return layers, method, not lama_used, stats

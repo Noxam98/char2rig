@@ -11,6 +11,7 @@
       masks.overrides.png     ручной перенос пикселей между частями
       masks.overrides.json    легенда к нему: номер → имя кости, хеш арта
       layers/<part>.png       RGBA-слой части
+      layers.overrides/       ручные мазки по достройке, по маске на часть
       rig.json                риг
       preview.gif             стресс-тест
       preview_strip.png       та же анимация лентой (видно прямо в git)
@@ -100,6 +101,16 @@ class Character:
     @property
     def layers_dir(self) -> Path:
         return self.root / "layers"
+
+    @property
+    def redraw_dir(self) -> Path:
+        """Мазки по достройке, по маске на часть: 255 — заново, 128 — не трогать."""
+        return self.root / "layers.overrides"
+
+    @property
+    def redraw_legend(self) -> Path:
+        """К мазкам достройки: хеш арта, по которому их рисовали."""
+        return self.root / "layers.overrides.json"
 
     @property
     def rig(self) -> Path:
